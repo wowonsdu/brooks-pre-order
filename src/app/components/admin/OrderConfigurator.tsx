@@ -6,9 +6,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
+import { Label } from '../ui/label';
 import {
   ArrowLeft, ChevronDown, ChevronRight, Package, DollarSign,
-  ChevronLeft, Users, Calendar, SplitSquareVertical, Trash2, ShoppingCart,
+  Users, Calendar, SplitSquareVertical, Plus, Trash2, ShoppingCart,
   Filter, Eye, Check
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -44,17 +45,12 @@ export function OrderConfigurator() {
   const [selectedMonths, setSelectedMonths] = useState<Set<string>>(new Set());
   const [selectedCustomers, setSelectedCustomers] = useState<Set<string>>(new Set());
 
-  // Quick order builder state (right-side composer)
-  const [stagedPriorities, setStagedPriorities] = useState<Set<number>>(new Set());
-  const [stagedMonths, setStagedMonths] = useState<Set<string>>(new Set());
-  const [stagedCustomers, setStagedCustomers] = useState<Set<string>>(new Set());
-
   // Expandable sections
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['quick', 'month']));
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['priority', 'month']));
 
   // Order drafts - multiple orders can be built
   const [orderDrafts, setOrderDrafts] = useState<OrderDraft[]>([]);
-  const [activeTab, setActiveTab] = useState<'preview' | 'remaining' | 'drafts'>('preview');
+  const [activeTab, setActiveTab] = useState<'preview' | 'drafts'>('preview');
 
   const toggleSection = (section: string) => {
     const next = new Set(expandedSections);
@@ -149,29 +145,25 @@ export function OrderConfigurator() {
     return Array.from(map.entries()).sort((a, b) => a[1].priority - b[1].priority);
   }, [consolidatedItems]);
 
-  const applyFilterSet = (
-    sourceItems: ConsolidatedItemFull[],
-    filterState: { priorities: Set<number>; months: Set<string>; customers: Set<string> }
-  ) => {
-    const { priorities, months, customers } = filterState;
-
-    const hasPriorityFilter = priorities.size > 0;
-    const hasMonthFilter = months.size > 0;
-    const hasCustomerFilter = customers.size > 0;
+  // Filtered items based on current selection
+  const filteredItems = useMemo(() => {
+    const hasPriorityFilter = selectedPriorities.size > 0;
+    const hasMonthFilter = selectedMonths.size > 0;
+    const hasCustomerFilter = selectedCustomers.size > 0;
 
     if (!hasPriorityFilter && !hasMonthFilter && !hasCustomerFilter) {
-      return sourceItems.map(item => ({ ...item }));
+      return consolidatedItems.map(item => ({ ...item }));
     }
 
-    return sourceItems
+    return consolidatedItems
       .map(item => {
         let qty = 0;
 
         // If we have customer filter, calculate from customer level
         if (hasCustomerFilter) {
           Object.entries(item.byCustomer).forEach(([custId, info]) => {
-            if (customers.has(custId)) {
-              if (hasPriorityFilter && !priorities.has(info.priority)) return;
+            if (selectedCustomers.has(custId)) {
+              if (hasPriorityFilter && !selectedPriorities.has(info.priority)) return;
               qty += info.qty;
             }
           });
@@ -181,19 +173,19 @@ export function OrderConfigurator() {
           let priorityRatio = 0;
           let monthRatio = 0;
           Object.entries(item.byPriority).forEach(([p, q]) => {
-            if (priorities.has(parseInt(p))) priorityRatio += q / totalQty;
+            if (selectedPriorities.has(parseInt(p))) priorityRatio += q / totalQty;
           });
           Object.entries(item.byMonth).forEach(([m, q]) => {
-            if (months.has(m)) monthRatio += q / totalQty;
+            if (selectedMonths.has(m)) monthRatio += q / totalQty;
           });
           qty = Math.round(totalQty * priorityRatio * monthRatio);
         } else if (hasPriorityFilter) {
           Object.entries(item.byPriority).forEach(([p, q]) => {
-            if (priorities.has(parseInt(p))) qty += q;
+            if (selectedPriorities.has(parseInt(p))) qty += q;
           });
         } else if (hasMonthFilter) {
           Object.entries(item.byMonth).forEach(([m, q]) => {
-            if (months.has(m)) qty += q;
+            if (selectedMonths.has(m)) qty += q;
           });
         }
 
@@ -201,52 +193,7 @@ export function OrderConfigurator() {
         return { ...item, quantity: qty };
       })
       .filter(Boolean) as ConsolidatedItemFull[];
-  };
-
-  // Summary quantities already allocated to drafts by variant
-  const allocatedByVariant = useMemo(() => {
-    const map = new Map<string, number>();
-    orderDrafts.forEach(draft => {
-      draft.items.forEach(item => {
-        map.set(item.variantId, (map.get(item.variantId) || 0) + item.quantity);
-      });
-    });
-    return map;
-  }, [orderDrafts]);
-
-  // Filtered items based on current selection
-  const filteredItems = useMemo(
-    () => applyFilterSet(consolidatedItems, { priorities: selectedPriorities, months: selectedMonths, customers: selectedCustomers }),
-    [consolidatedItems, selectedPriorities, selectedMonths, selectedCustomers]
-  );
-
-  // Remaining items not yet assigned to any draft
-  const remainingItems = useMemo(() => {
-    return consolidatedItems
-      .map(item => {
-        const remainingQty = Math.max(0, item.quantity - (allocatedByVariant.get(item.variantId) || 0));
-        if (remainingQty === 0) return null;
-        return { ...item, quantity: remainingQty };
-      })
-      .filter(Boolean) as ConsolidatedItemFull[];
-  }, [consolidatedItems, allocatedByVariant]);
-
-  const filteredRemainingItems = useMemo(
-    () => applyFilterSet(remainingItems, { priorities: selectedPriorities, months: selectedMonths, customers: selectedCustomers }),
-    [remainingItems, selectedPriorities, selectedMonths, selectedCustomers]
-  );
-
-  const stagedItems = useMemo(
-    () => applyFilterSet(consolidatedItems, { priorities: stagedPriorities, months: stagedMonths, customers: stagedCustomers }),
-    [consolidatedItems, stagedPriorities, stagedMonths, stagedCustomers]
-  );
-
-  const stagedTotalQty = stagedItems.reduce((s, i) => s + i.quantity, 0);
-  const stagedTotalValue = stagedItems.reduce((s, i) => {
-    const p = mockProducts.find(pr => pr.id === i.productId);
-    return s + i.quantity * (p?.basePrice || 0);
-  }, 0);
-  const stagedHasItems = stagedItems.length > 0;
+  }, [consolidatedItems, selectedPriorities, selectedMonths, selectedCustomers]);
 
   // Summary stats
   const totalQty = filteredItems.reduce((s, i) => s + i.quantity, 0);
@@ -255,14 +202,6 @@ export function OrderConfigurator() {
     return s + i.quantity * (p?.basePrice || 0);
   }, 0);
   const uniqueProducts = new Set(filteredItems.map(i => i.productId)).size;
-
-  const remainingTotalQty = filteredRemainingItems.reduce((s, i) => s + i.quantity, 0);
-  const remainingTotalValue = filteredRemainingItems.reduce((s, i) => {
-    const p = mockProducts.find(pr => pr.id === i.productId);
-    return s + i.quantity * (p?.basePrice || 0);
-  }, 0);
-  const remainingItemsCount = filteredRemainingItems.length;
-  const remainingProductsCount = new Set(filteredRemainingItems.map(i => i.productId)).size;
 
   const getProductDetails = (productId: string, variantId: string) => {
     const product = mockProducts.find(p => p.id === productId);
@@ -294,53 +233,17 @@ export function OrderConfigurator() {
     setSelectedCustomers(new Set());
   };
 
-  const clearStagedFilters = () => {
-    setStagedPriorities(new Set());
-    setStagedMonths(new Set());
-    setStagedCustomers(new Set());
-  };
-
-  const toggleStagedPriority = (p: number) => {
-    const next = new Set(stagedPriorities);
-    next.has(p) ? next.delete(p) : next.add(p);
-    setStagedPriorities(next);
-  };
-
-  const toggleStagedMonth = (m: string) => {
-    const next = new Set(stagedMonths);
-    next.has(m) ? next.delete(m) : next.add(m);
-    setStagedMonths(next);
-  };
-
-  const toggleStagedCustomer = (c: string) => {
-    const next = new Set(stagedCustomers);
-    next.has(c) ? next.delete(c) : next.add(c);
-    setStagedCustomers(next);
-  };
-
-  const hasStagedFilters = stagedPriorities.size > 0 || stagedMonths.size > 0 || stagedCustomers.size > 0;
-
   const hasActiveFilters = selectedPriorities.size > 0 || selectedMonths.size > 0 || selectedCustomers.size > 0;
 
   // Add current filtered selection as a new order draft
-  const addToDrafts = (
-    items = filteredItems,
-    activeSource: 'preview' | 'remaining' = 'preview',
-    options?: { priorities: Set<number>; months: Set<string>; customers: Set<string> }
-  ) => {
-    if (items.length === 0) return;
+  const addToDrafts = () => {
+    if (filteredItems.length === 0) return;
 
     const filterDesc: string[] = [];
-    const criteria = options || {
-      priorities: selectedPriorities,
-      months: selectedMonths,
-      customers: selectedCustomers,
-    };
-
-    if (criteria.priorities.size > 0) filterDesc.push(`P${Array.from(criteria.priorities).sort().join(',P')}`);
-    if (criteria.months.size > 0) filterDesc.push(Array.from(criteria.months).join(', '));
-    if (criteria.customers.size > 0) {
-      const names = Array.from(criteria.customers).map(id => {
+    if (selectedPriorities.size > 0) filterDesc.push(`P${Array.from(selectedPriorities).sort().join(',P')}`);
+    if (selectedMonths.size > 0) filterDesc.push(Array.from(selectedMonths).join(', '));
+    if (selectedCustomers.size > 0) {
+      const names = Array.from(selectedCustomers).map(id => {
         const c = availableCustomers.find(([cid]) => cid === id);
         return c ? c[1].company : id;
       });
@@ -353,11 +256,11 @@ export function OrderConfigurator() {
         ? `Brooks Europe (${filterDesc.join(' / ')})`
         : `Brooks Europe - Całość`,
       filters: {
-        priorities: Array.from(criteria.priorities),
-        months: Array.from(criteria.months),
-        customers: Array.from(criteria.customers),
+        priorities: Array.from(selectedPriorities),
+        months: Array.from(selectedMonths),
+        customers: Array.from(selectedCustomers),
       },
-      items: items.map(item => ({
+      items: filteredItems.map(item => ({
         variantId: item.variantId,
         productId: item.productId,
         quantity: item.quantity,
@@ -365,22 +268,8 @@ export function OrderConfigurator() {
     };
 
     setOrderDrafts(prev => [...prev, draft]);
-    const suffix = activeSource === 'remaining' ? ' (pozostałe)' : '';
-    toast.success(`Dodano zamówienie do listy${suffix}`, { description: draft.name });
+    toast.success('Dodano zamówienie do listy', { description: draft.name });
     setActiveTab('drafts');
-
-    if (activeSource === 'preview') {
-      clearStagedFilters();
-    }
-  };
-
-  const confirmDraftFromComposer = () => {
-    if (!hasStagedFilters || stagedTotalQty === 0) return;
-    addToDrafts(stagedItems, 'preview', {
-      priorities: new Set(stagedPriorities),
-      months: new Set(stagedMonths),
-      customers: new Set(stagedCustomers),
-    });
   };
 
   const removeDraft = (id: string) => {
@@ -565,7 +454,155 @@ export function OrderConfigurator() {
             )}
           </div>
 
-          {/* Quick Split Section */}
+          {/* Priority Section */}
+          <div className="border-b">
+            <button
+              className="w-full flex items-center justify-between p-4 hover:bg-gray-50 text-left"
+              onClick={() => toggleSection('priority')}
+            >
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-gray-500" />
+                <span className="font-medium text-sm">Priorytet klienta</span>
+              </div>
+              {expandedSections.has('priority') ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
+            </button>
+            {expandedSections.has('priority') && (
+              <div className="px-4 pb-4 space-y-2">
+                {availablePriorities.map(p => {
+                  const qty = consolidatedItems.reduce((s, i) => s + (i.byPriority[p] || 0), 0);
+                  const val = consolidatedItems.reduce((s, i) => {
+                    const pr = mockProducts.find(x => x.id === i.productId);
+                    return s + (i.byPriority[p] || 0) * (pr?.basePrice || 0);
+                  }, 0);
+                  const isSelected = selectedPriorities.has(p);
+                  return (
+                    <button
+                      key={p}
+                      onClick={() => togglePriority(p)}
+                      className={`w-full flex items-center justify-between p-3 rounded-lg border text-left transition-all ${
+                        isSelected
+                          ? `${priorityColors[p]} border-current ring-1 ring-current/20`
+                          : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className={`w-5 h-5 rounded border flex items-center justify-center text-xs ${
+                          isSelected ? 'bg-current/20 border-current' : 'border-gray-300'
+                        }`}>
+                          {isSelected && <Check className="w-3 h-3" />}
+                        </div>
+                        <span className="font-medium text-sm">Priorytet {p}</span>
+                      </div>
+                      <div className="text-right text-xs">
+                        <div className="font-semibold">{qty} szt.</div>
+                        <div className="text-gray-500">{val.toLocaleString('pl-PL')} EUR</div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Month Section */}
+          <div className="border-b">
+            <button
+              className="w-full flex items-center justify-between p-4 hover:bg-gray-50 text-left"
+              onClick={() => toggleSection('month')}
+            >
+              <div className="flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-gray-500" />
+                <span className="font-medium text-sm">Miesiąc dostawy</span>
+              </div>
+              {expandedSections.has('month') ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
+            </button>
+            {expandedSections.has('month') && (
+              <div className="px-4 pb-4 space-y-2">
+                {availableMonths.map(m => {
+                  const qty = consolidatedItems.reduce((s, i) => s + (i.byMonth[m] || 0), 0);
+                  const val = consolidatedItems.reduce((s, i) => {
+                    const pr = mockProducts.find(x => x.id === i.productId);
+                    return s + (i.byMonth[m] || 0) * (pr?.basePrice || 0);
+                  }, 0);
+                  const isSelected = selectedMonths.has(m);
+                  return (
+                    <button
+                      key={m}
+                      onClick={() => toggleMonth(m)}
+                      className={`w-full flex items-center justify-between p-3 rounded-lg border text-left transition-all ${
+                        isSelected
+                          ? 'bg-purple-50 text-purple-800 border-purple-300 ring-1 ring-purple-200'
+                          : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className={`w-5 h-5 rounded border flex items-center justify-center text-xs ${
+                          isSelected ? 'bg-purple-200 border-purple-400' : 'border-gray-300'
+                        }`}>
+                          {isSelected && <Check className="w-3 h-3" />}
+                        </div>
+                        <span className="font-medium text-sm capitalize">{m}</span>
+                      </div>
+                      <div className="text-right text-xs">
+                        <div className="font-semibold">{qty} szt.</div>
+                        <div className="text-gray-500">{val.toLocaleString('pl-PL')} EUR</div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Customer Section */}
+          <div className="border-b">
+            <button
+              className="w-full flex items-center justify-between p-4 hover:bg-gray-50 text-left"
+              onClick={() => toggleSection('customer')}
+            >
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-gray-500" />
+                <span className="font-medium text-sm">Klient</span>
+                <Badge variant="outline" className="text-xs">{availableCustomers.length}</Badge>
+              </div>
+              {expandedSections.has('customer') ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
+            </button>
+            {expandedSections.has('customer') && (
+              <div className="px-4 pb-4 space-y-2 max-h-64 overflow-y-auto">
+                {availableCustomers.map(([custId, info]) => {
+                  const isSelected = selectedCustomers.has(custId);
+                  return (
+                    <button
+                      key={custId}
+                      onClick={() => toggleCustomer(custId)}
+                      className={`w-full flex items-center justify-between p-3 rounded-lg border text-left transition-all ${
+                        isSelected
+                          ? 'bg-teal-50 text-teal-800 border-teal-300 ring-1 ring-teal-200'
+                          : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className={`w-5 h-5 rounded border flex-shrink-0 flex items-center justify-center text-xs ${
+                          isSelected ? 'bg-teal-200 border-teal-400' : 'border-gray-300'
+                        }`}>
+                          {isSelected && <Check className="w-3 h-3" />}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-medium text-sm truncate">{info.company}</div>
+                          <div className="text-xs text-gray-500">P{info.priority}</div>
+                        </div>
+                      </div>
+                      <div className="text-right text-xs flex-shrink-0">
+                        <div className="font-semibold">{info.totalQty} szt.</div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Quick Actions */}
           <div className="border-b">
             <button
               className="w-full flex items-center justify-between p-4 hover:bg-gray-50 text-left"
@@ -579,6 +616,10 @@ export function OrderConfigurator() {
             </button>
             {expandedSections.has('quick') && (
               <div className="px-4 pb-4 space-y-2">
+                <Button variant="outline" size="sm" className="w-full justify-start text-xs" onClick={quickSplitByPriority}>
+                  <Users className="w-3 h-3 mr-2" />
+                  Osobne zamówienia per priorytet
+                </Button>
                 <Button variant="outline" size="sm" className="w-full justify-start text-xs" onClick={quickSplitByMonth}>
                   <Calendar className="w-3 h-3 mr-2" />
                   Osobne zamówienia per miesiąc
@@ -605,207 +646,20 @@ export function OrderConfigurator() {
             )}
           </div>
 
-          {/* Month Section */}
-          <div className="border-b">
-            <button
-              className="w-full flex items-center justify-between p-4 hover:bg-gray-50 text-left"
-              onClick={() => toggleSection('month')}
-            >
-              <div className="flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-gray-500" />
-                <span className="font-medium text-sm">Miesiąc dostawy</span>
-              </div>
-              {expandedSections.has('month') ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
-            </button>
-            {expandedSections.has('month') && (
-              <div className="px-4 pb-4 space-y-2">
-                {availableMonths.map(m => {
-                  const qty = consolidatedItems.reduce((s, i) => s + (i.byMonth[m] || 0), 0);
-                  const val = consolidatedItems.reduce((s, i) => {
-                    const pr = mockProducts.find(x => x.id === i.productId);
-                    return s + (i.byMonth[m] || 0) * (pr?.basePrice || 0);
-                  }, 0);
-                  const isSelected = selectedMonths.has(m);
-                  const isStaged = stagedMonths.has(m);
-                  return (
-                    <div
-                      key={m}
-                      className={`group relative w-full flex items-center justify-between p-3 rounded-lg border text-left transition-all ${
-                        isSelected
-                          ? 'bg-purple-50 text-purple-800 border-purple-300 ring-1 ring-purple-200'
-                          : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                      }`}
-                    >
-                      <button
-                        onClick={() => toggleMonth(m)}
-                        className="flex-1 flex items-center justify-between min-w-0"
-                      >
-                        <div className="flex items-center gap-2">
-                          <div className={`w-5 h-5 rounded border flex items-center justify-center text-xs ${
-                            isSelected ? 'bg-purple-200 border-purple-400' : 'border-gray-300'
-                          }`}>
-                            {isSelected && <Check className="w-3 h-3" />}
-                          </div>
-                          <span className="font-medium text-sm capitalize">{m}</span>
-                        </div>
-                        <div className="text-right text-xs">
-                          <div className="font-semibold">{qty} szt.</div>
-                          <div className="text-gray-500">{val.toLocaleString('pl-PL')} EUR</div>
-                        </div>
-                      </button>
-                      <button
-                        onClick={e => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          toggleStagedMonth(m);
-                        }}
-                        className="ml-2 p-1 rounded-md hover:bg-gray-100 text-gray-500 hover:text-blue-700 opacity-0 group-hover:opacity-100 transition-opacity"
-                        title="Dodaj do kompozytora zamówienia"
-                      >
-                        {isStaged ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Priority Section */}
-          <div className="border-b">
-            <button
-              className="w-full flex items-center justify-between p-4 hover:bg-gray-50 text-left"
-              onClick={() => toggleSection('priority')}
-            >
-              <div className="flex items-center gap-2">
-                <Users className="w-4 h-4 text-gray-500" />
-                <span className="font-medium text-sm">Priorytet klienta</span>
-              </div>
-              {expandedSections.has('priority') ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
-            </button>
-          {expandedSections.has('priority') && (
-              <div className="px-4 pb-4 space-y-2">
-                {availablePriorities.map(p => {
-                  const qty = consolidatedItems.reduce((s, i) => s + (i.byPriority[p] || 0), 0);
-                  const val = consolidatedItems.reduce((s, i) => {
-                    const pr = mockProducts.find(x => x.id === i.productId);
-                    return s + (i.byPriority[p] || 0) * (pr?.basePrice || 0);
-                  }, 0);
-                  const isSelected = selectedPriorities.has(p);
-                  const isStaged = stagedPriorities.has(p);
-                  return (
-                    <div
-                      key={p}
-                      className={`group relative w-full flex items-center justify-between p-3 rounded-lg border text-left transition-all ${
-                        isSelected
-                          ? `${priorityColors[p]} border-current ring-1 ring-current/20`
-                          : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                      }`}
-                    >
-                      <button
-                        onClick={() => togglePriority(p)}
-                        className="flex-1 flex items-center justify-between min-w-0"
-                      >
-                        <div className="flex items-center gap-2">
-                          <div className={`w-5 h-5 rounded border flex items-center justify-center text-xs ${
-                            isSelected ? 'bg-current/20 border-current' : 'border-gray-300'
-                          }`}>
-                            {isSelected && <Check className="w-3 h-3" />}
-                          </div>
-                          <span className="font-medium text-sm">Priorytet {p}</span>
-                        </div>
-                        <div className="text-right text-xs">
-                          <div className="font-semibold">{qty} szt.</div>
-                          <div className="text-gray-500">{val.toLocaleString('pl-PL')} EUR</div>
-                        </div>
-                      </button>
-                      <button
-                        onClick={e => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          toggleStagedPriority(p);
-                        }}
-                        className="ml-2 p-1 rounded-md hover:bg-gray-100 text-gray-500 hover:text-blue-700 opacity-0 group-hover:opacity-100 transition-opacity"
-                        title="Dodaj do kompozytora zamówienia"
-                      >
-                        {isStaged ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Customer Section */}
-          <div className="border-b">
-            <button
-              className="w-full flex items-center justify-between p-4 hover:bg-gray-50 text-left"
-              onClick={() => toggleSection('customer')}
-            >
-              <div className="flex items-center gap-2">
-                <Users className="w-4 h-4 text-gray-500" />
-                <span className="font-medium text-sm">Klient</span>
-                <Badge variant="outline" className="text-xs">{availableCustomers.length}</Badge>
-              </div>
-              {expandedSections.has('customer') ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
-            </button>
-            {expandedSections.has('customer') && (
-              <div className="px-4 pb-4 space-y-2 max-h-64 overflow-y-auto">
-                {availableCustomers.map(([custId, info]) => {
-                  const isSelected = selectedCustomers.has(custId);
-                  const isStaged = stagedCustomers.has(custId);
-                  return (
-                    <div
-                      key={custId}
-                      className={`group relative w-full flex items-center justify-between p-3 rounded-lg border text-left transition-all ${
-                        isSelected
-                          ? 'bg-teal-50 text-teal-800 border-teal-300 ring-1 ring-teal-200'
-                          : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                      }`}
-                    >
-                      <button
-                        onClick={() => toggleCustomer(custId)}
-                        className="flex-1 flex items-center justify-between min-w-0"
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <div className={`w-5 h-5 rounded border flex-shrink-0 flex items-center justify-center text-xs ${
-                            isSelected ? 'bg-teal-200 border-teal-400' : 'border-gray-300'
-                          }`}>
-                            {isSelected && <Check className="w-3 h-3" />}
-                          </div>
-                          <div className="min-w-0">
-                            <div className="font-medium text-sm truncate">{info.company}</div>
-                            <div className="text-xs text-gray-500">P{info.priority}</div>
-                          </div>
-                        </div>
-                        <div className="text-right text-xs flex-shrink-0">
-                          <div className="font-semibold">{info.totalQty} szt.</div>
-                        </div>
-                      </button>
-                      <button
-                        onClick={e => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          toggleStagedCustomer(custId);
-                        }}
-                        className="ml-2 p-1 rounded-md hover:bg-gray-100 text-gray-500 hover:text-blue-700 opacity-0 group-hover:opacity-100 transition-opacity"
-                        title="Dodaj do kompozytora zamówienia"
-                      >
-                        {isStaged ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Legacy bottom action button replaced by right-side composer confirmation */}
+          {/* Add to drafts button */}
           <div className="p-4">
-            <p className="text-xs text-gray-500 text-center">
-              Podgląd wyboru działa przez strzałki w wierszach filtrów.<br />
-              Po prawej stronie zatwierdzasz skład zamówienia.
+            <Button
+              className="w-full gap-2"
+              onClick={addToDrafts}
+              disabled={filteredItems.length === 0}
+            >
+              <Plus className="w-4 h-4" />
+              Dodaj do zamówień
+            </Button>
+            <p className="text-xs text-gray-500 mt-2 text-center">
+              {hasActiveFilters
+                ? `Wybrano ${totalQty} szt. / ${totalValue.toLocaleString('pl-PL')} EUR`
+                : 'Wybierz filtry lub dodaj całość'}
             </p>
           </div>
         </div>
@@ -836,85 +690,10 @@ export function OrderConfigurator() {
               <ShoppingCart className="w-4 h-4 inline mr-2" />
               Zamówienia ({orderDrafts.length})
             </button>
-            <button
-              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === 'remaining'
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-              onClick={() => setActiveTab('remaining')}
-            >
-              <Package className="w-4 h-4 inline mr-2" />
-              Pozostałe do zamówienia ({remainingItemsCount} pozycji)
-            </button>
           </div>
 
           {activeTab === 'preview' && (
             <div className="p-6 space-y-6">
-              <Card>
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-sm font-semibold text-gray-900 mb-1">Kreator składu zamówienia</p>
-                      <p className="text-xs text-gray-500">
-                        {hasStagedFilters
-                          ? 'Dodaj kolejne filtry strzałką, a potem potwierdź skład'
-                          : 'Kliknij strzałkę na elemencie filtru, by dodać go do kompozytora.'
-                        }
-                      </p>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={clearStagedFilters}
-                        disabled={!hasStagedFilters}
-                      >
-                        Wyczyść
-                      </Button>
-                      <Button
-                        size="sm"
-                        onClick={confirmDraftFromComposer}
-                        disabled={!stagedHasItems}
-                      >
-                        Zatwierdź i dodaj do zamówień
-                      </Button>
-                    </div>
-                  </div>
-                  {hasStagedFilters ? (
-                    <div className="mt-3 flex flex-wrap gap-1">
-                      {Array.from(stagedPriorities)
-                        .sort((a, b) => a - b)
-                        .map(p => (
-                          <Badge key={`staged-p-${p}`} variant="outline" className={priorityColors[p]}>
-                            P{p}
-                          </Badge>
-                        ))}
-                      {Array.from(stagedMonths).map(m => (
-                        <Badge key={`staged-m-${m}`} variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">
-                          {m}
-                        </Badge>
-                      ))}
-                      {Array.from(stagedCustomers).map(custId => {
-                        const c = availableCustomers.find(([id]) => id === custId);
-                        return (
-                          <Badge key={`staged-c-${custId}`} variant="outline" className="bg-teal-50 text-teal-700 border-teal-200">
-                            {c ? c[1].company : custId}
-                          </Badge>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <p className="mt-3 text-xs text-gray-500">Brak aktywnych kryteriów w kompozytorze.</p>
-                  )}
-                  <div className="mt-3 text-xs text-gray-600">
-                    {stagedHasItems
-                      ? `Suma: ${stagedTotalQty} szt. / ${stagedTotalValue.toLocaleString('pl-PL')} EUR`
-                      : 'Suma: 0 szt. / 0 EUR'}
-                  </div>
-                </CardContent>
-              </Card>
-
               {/* Summary Cards */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <Card>
@@ -1081,7 +860,7 @@ export function OrderConfigurator() {
                 <div className="text-center py-16 text-gray-500">
                   <ShoppingCart className="w-12 h-12 mx-auto mb-3 text-gray-300" />
                   <p className="font-medium mb-1">Brak zamówień w kolejce</p>
-                  <p className="text-sm">Zbuduj skład po prawej w kompozytorze lub skorzystaj z szybkiego podziału</p>
+                  <p className="text-sm">Wybierz filtry po lewej i kliknij "Dodaj do zamówień"<br/>lub skorzystaj z szybkiego podziału</p>
                 </div>
               ) : (
                 <>
@@ -1175,118 +954,6 @@ export function OrderConfigurator() {
                   </Card>
                 </>
               )}
-            </div>
-          )}
-
-          {activeTab === 'remaining' && (
-            <div className="p-6 space-y-6">
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                <Card>
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-orange-100 flex items-center justify-center">
-                        <Package className="w-5 h-5 text-orange-600" />
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500">Pozycje pozostałe</p>
-                        <p className="text-xl font-semibold">{remainingItemsCount}</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center">
-                        <Package className="w-5 h-5 text-blue-600" />
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500">Ilość szt.</p>
-                        <p className="text-xl font-semibold">{remainingTotalQty}</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center">
-                        <DollarSign className="w-5 h-5 text-green-600" />
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500">Wartość</p>
-                        <p className="text-xl font-semibold">{remainingTotalValue.toLocaleString('pl-PL')} EUR</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center">
-                        <SplitSquareVertical className="w-5 h-5 text-purple-600" />
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500">Produkty</p>
-                        <p className="text-xl font-semibold">{remainingProductsCount}</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm">Pozycje do ręcznej alokacji</CardTitle>
-                </CardHeader>
-                <CardContent className="p-0">
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="text-xs">SKU</TableHead>
-                          <TableHead className="text-xs">Produkt</TableHead>
-                          <TableHead className="text-xs">Kolor</TableHead>
-                          <TableHead className="text-xs">Rozmiar</TableHead>
-                          <TableHead className="text-xs text-right">Ilość pozostała</TableHead>
-                          <TableHead className="text-xs text-right">Wartość</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {filteredRemainingItems.length === 0 ? (
-                          <TableRow>
-                            <TableCell colSpan={6} className="text-center text-xs text-gray-500 py-6">
-                              Brak pozostałych pozycji dla wybranych filtrów.
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          filteredRemainingItems.slice(0, 50).map(item => {
-                            const { product, variant } = getProductDetails(item.productId, item.variantId);
-                            if (!product || !variant) return null;
-                            return (
-                              <TableRow key={item.variantId}>
-                                <TableCell className="font-mono text-xs">{variant.sku}</TableCell>
-                                <TableCell className="text-xs font-medium">{product.name}</TableCell>
-                                <TableCell className="text-xs">{variant.color}</TableCell>
-                                <TableCell className="text-xs">{variant.size}</TableCell>
-                                <TableCell className="text-xs text-right font-semibold">{item.quantity}</TableCell>
-                                <TableCell className="text-xs text-right">{(item.quantity * product.basePrice).toLocaleString('pl-PL')} EUR</TableCell>
-                              </TableRow>
-                            );
-                          })
-                        )}
-                        {filteredRemainingItems.length > 50 && (
-                          <TableRow>
-                            <TableCell colSpan={6} className="text-center text-xs text-gray-500 py-3">
-                              ...i {filteredRemainingItems.length - 50} kolejnych pozycji
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </CardContent>
-              </Card>
             </div>
           )}
         </div>
