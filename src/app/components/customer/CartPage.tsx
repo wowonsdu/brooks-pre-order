@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { mockProducts } from '../../lib/mock-data';
 import { useAuth } from '../../lib/auth-context';
+import { createPreorder } from '../../lib/demo-store';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Input } from '../ui/input';
@@ -49,16 +50,32 @@ export function CartPage() {
       toast.error('Koszyk jest pusty');
       return;
     }
+    if (!user) {
+      toast.error('Brak zalogowanego użytkownika');
+      return;
+    }
+    if (!user.id) {
+      toast.error('Nieprawidłowe konto klienta');
+      return;
+    }
 
-    // Mock preorder submission
-    const preorderNumber = `PO-2026-${String(Math.floor(Math.random() * 1000)).padStart(3, '0')}`;
+    const preorder = createPreorder({
+      customerId: user.id,
+      items: cart,
+      notes: notes.trim() || undefined,
+    });
+
+    if (!preorder) {
+      toast.error('Nie udało się utworzyć preorderu');
+      return;
+    }
     
     // Clear cart
     setCart([]);
     localStorage.removeItem('cart');
     
     toast.success('Preorder złożony pomyślnie!', {
-      description: `Numer zamówienia: ${preorderNumber}`,
+      description: `Numer zamówienia: ${preorder.orderNumber}`,
     });
     
     setTimeout(() => {

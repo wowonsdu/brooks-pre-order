@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { mockUsers, User } from '../../lib/mock-data';
+import { useCustomers, setCustomerPriority } from '../../lib/demo-store';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -11,11 +11,9 @@ import { Search, ArrowUp, ArrowDown, Save } from 'lucide-react';
 import { toast } from 'sonner';
 
 export function CustomersManagementPage() {
-  const [customers, setCustomers] = useState(() => 
-    mockUsers
-      .filter(u => u.role === 'b2b_customer')
-      .sort((a, b) => (a.priority || 999) - (b.priority || 999))
-  );
+  const customers = useCustomers()
+    .filter(user => user.role === 'b2b_customer')
+    .sort((a, b) => (a.priority || 999) - (b.priority || 999));
   const [searchQuery, setSearchQuery] = useState('');
 
   const filteredCustomers = customers.filter(customer =>
@@ -25,11 +23,7 @@ export function CustomersManagementPage() {
   );
 
   const updatePriority = (userId: string, newPriority: number) => {
-    setCustomers(prev =>
-      prev.map(c =>
-        c.id === userId ? { ...c, priority: newPriority } : c
-      ).sort((a, b) => (a.priority || 999) - (b.priority || 999))
-    );
+    setCustomerPriority(userId, newPriority);
   };
 
   const movePriority = (userId: string, direction: 'up' | 'down') => {

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, ReactNode } from 'react';
-import { User, mockUsers } from './mock-data';
+import { User } from './mock-data';
+import { useCustomersAll, findCustomerNameById } from './demo-store';
 
 interface AuthContextType {
   user: User | null;
@@ -10,6 +11,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const users = useCustomersAll();
   const [user, setUser] = useState<User | null>(() => {
     // Check localStorage for persisted user
     const savedUser = localStorage.getItem('currentUser');
@@ -17,7 +19,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   const login = (email: string) => {
-    const foundUser = mockUsers.find(u => u.email === email);
+    const foundUser = users.find(u => u.email === email);
     if (foundUser) {
       setUser(foundUser);
       localStorage.setItem('currentUser', JSON.stringify(foundUser));

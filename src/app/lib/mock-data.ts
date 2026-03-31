@@ -3,6 +3,8 @@
 
 export type UserRole = 'admin' | 'b2b_customer';
 
+export type PreorderSeason = 'spring' | 'winter';
+
 export interface User {
   id: string;
   email: string;
@@ -55,10 +57,14 @@ export interface Preorder {
   customerName: string;
   companyName: string;
   priority: number;
+  customerPriority: number;
   items: PreorderItem[];
   status: 'pending' | 'partially_allocated' | 'allocated' | 'partially_delivered' | 'completed' | 'cancelled';
   createdAt: string;
   notes?: string;
+  allocationOrder?: number;
+  seasonWindow?: PreorderSeason;
+  deliveryMonth?: number;
 }
 
 export interface ConsolidatedOrder {
@@ -93,6 +99,23 @@ export interface Delivery {
   expectedDate?: string;
   receivedDate?: string;
   createdAt: string;
+  matchedOrderSummary?: DeliveryOrderMatchSummary[];
+  awizementAllocationPlan?: Record<string, DeliveryAwizmentMatch[]>;
+}
+
+export interface DeliveryAwizmentMatch {
+  orderId: string;
+  orderNumber: string;
+  requested: number;
+}
+
+export interface DeliveryOrderMatchSummary {
+  orderNumber: string;
+  orderId?: string;
+  companyName?: string;
+  requested: number;
+  totalOrderQuantity: number;
+  allocationRate: number;
 }
 
 export interface AllocationItem {

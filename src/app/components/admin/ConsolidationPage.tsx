@@ -1,12 +1,12 @@
 import { useState, useMemo } from 'react';
-import { mockPreorders, mockProducts, mockConsolidatedOrders } from '../../lib/mock-data';
+import { mockProducts } from '../../lib/mock-data';
+import { addConsolidatedOrders, useConsolidatedOrders, usePreorders, updateConsolidatedOrders } from '../../lib/demo-store';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Label } from '../ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { FileText, Download, Send, Plus, ChevronDown, ChevronUp, SplitSquareVertical, X, List, LayoutGrid, Shield, CalendarDays, ArrowUp, ArrowDown, ChevronsUpDown } from 'lucide-react';
 import { toast } from 'sonner';
 import React from 'react';
@@ -31,8 +31,9 @@ interface SplitConfig {
 
 export function ConsolidationPage() {
   const navigate = useNavigate();
+  const preorders = usePreorders();
+  const consolidatedOrders = useConsolidatedOrders();
   const [selectedBrand, setSelectedBrand] = useState<string>('Brooks');
-  const [consolidatedOrders, setConsolidatedOrders] = useState(mockConsolidatedOrders);
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const [showOrderPlanner, setShowOrderPlanner] = useState(false);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
@@ -72,7 +73,7 @@ export function ConsolidationPage() {
   const consolidatePreorders = (): ConsolidatedItemWithDetails[] => {
     const consolidated = new Map<string, ConsolidatedItemWithDetails>();
 
-    mockPreorders
+    preorders
       .filter(po => po.status === 'pending')
       .forEach(preorder => {
         preorder.items.forEach(item => {
@@ -208,7 +209,7 @@ export function ConsolidationPage() {
       byMonth: Record<string, number>;
     }>();
 
-    mockPreorders.filter(po => po.status === 'pending').forEach(preorder => {
+    preorders.filter(po => po.status === 'pending').forEach(preorder => {
       preorder.items.forEach(item => {
         const product = mockProducts.find(p => p.id === item.productId);
         if (product?.brand !== selectedBrand) return;
@@ -265,7 +266,7 @@ export function ConsolidationPage() {
       byPriority: Record<number, number>;
     }>();
 
-    mockPreorders.filter(po => po.status === 'pending').forEach(preorder => {
+    preorders.filter(po => po.status === 'pending').forEach(preorder => {
       preorder.items.forEach(item => {
         const product = mockProducts.find(p => p.id === item.productId);
         if (product?.brand !== selectedBrand) return;
@@ -374,7 +375,7 @@ export function ConsolidationPage() {
       })),
     };
 
-    setConsolidatedOrders([...consolidatedOrders, newOrder]);
+    addConsolidatedOrders([newOrder]);
     toast.success('Utworzono zamówienie konsolidacyjne', {
       description: `Zamówienie dla ${selectedBrand} - ${consolidatedItems.reduce((s, i) => s + i.quantity, 0)} szt.`,
     });
@@ -407,7 +408,7 @@ export function ConsolidationPage() {
       };
     }).filter(o => o.items.length > 0);
 
-    setConsolidatedOrders([...consolidatedOrders, ...newOrders]);
+    addConsolidatedOrders(newOrders);
     toast.success(`Utworzono ${newOrders.length} zamówień wg priorytetu`, {
       description: newOrders.map(o => `${o.supplier}: ${o.items.reduce((s, i) => s + i.quantity, 0)} szt.`).join(', '),
     });
@@ -442,7 +443,7 @@ export function ConsolidationPage() {
       };
     }).filter(o => o.items.length > 0);
 
-    setConsolidatedOrders([...consolidatedOrders, ...newOrders]);
+    addConsolidatedOrders(newOrders);
     toast.success(`Utworzono ${newOrders.length} zamówień wg miesiąca`, {
       description: newOrders.map(o => `${o.supplier}: ${o.items.reduce((s, i) => s + i.quantity, 0)} szt.`).join(', '),
     });
@@ -489,7 +490,7 @@ export function ConsolidationPage() {
       items,
     }));
 
-    setConsolidatedOrders([...consolidatedOrders, ...newOrders]);
+    addConsolidatedOrders(newOrders);
     toast.success(`Utworzono ${newOrders.length} zamówień (max ${limit} szt. każde)`, {
       description: newOrders.map(o => `${o.supplier}: ${o.items.reduce((s, i) => s + i.quantity, 0)} szt.`).join(', '),
     });
@@ -541,7 +542,7 @@ export function ConsolidationPage() {
       items,
     }));
 
-    setConsolidatedOrders([...consolidatedOrders, ...newOrders]);
+    addConsolidatedOrders(newOrders);
     toast.success(`Utworzono ${newOrders.length} zamówień (max ${limit.toLocaleString()} EUR każde)`);
     setShowOrderPlanner(false);
     setSplitMode(null);
@@ -584,7 +585,7 @@ export function ConsolidationPage() {
         items,
       }));
 
-    setConsolidatedOrders([...consolidatedOrders, ...newOrders]);
+    addConsolidatedOrders(newOrders);
     toast.success(`Utworzono ${newOrders.length} zamówień (priorytet + miesiąc)`);
     setShowOrderPlanner(false);
     setSplitMode(null);
@@ -614,7 +615,7 @@ export function ConsolidationPage() {
   };
 
   const handleSendOrder = (orderId: string) => {
-    setConsolidatedOrders(orders =>
+    updateConsolidatedOrders(orders =>
       orders.map(o =>
         o.id === orderId
           ? { ...o, status: 'sent' as const, sentAt: new Date().toISOString() }
@@ -642,14 +643,7 @@ export function ConsolidationPage() {
         <p className="text-gray-600 mt-1">Agreguj preordery i generuj zamówienia do dostawców</p>
       </div>
 
-      <Tabs defaultValue="new" className="space-y-6">
-        <TabsList>
-          <TabsTrigger value="new">Nowa Konsolidacja</TabsTrigger>
-          <TabsTrigger value="history">Historia Zamówień</TabsTrigger>
-        </TabsList>
-
-        {/* New Consolidation */}
-        <TabsContent value="new" className="space-y-6">
+      <div className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle>Wybierz Markę</CardTitle>
@@ -1410,71 +1404,7 @@ export function ConsolidationPage() {
               )}
             </CardContent>
           </Card>
-        </TabsContent>
-
-        {/* Order History */}
-        <TabsContent value="history">
-          <Card>
-            <CardHeader>
-              <CardTitle>Historia Zamówień Konsolidacyjnych</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {consolidatedOrders.map(order => {
-                  const totalQty = order.items.reduce((sum, item) => sum + item.quantity, 0);
-                  return (
-                    <Card key={order.id}>
-                      <CardContent className="p-4">
-                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
-                          <div>
-                            <div className="flex items-center gap-3 mb-1">
-                              <h3 className="font-semibold">{order.supplier}</h3>
-                              {getStatusBadge(order.status)}
-                            </div>
-                            <p className="text-sm text-gray-600">
-                              Utworzone: {new Date(order.createdAt).toLocaleDateString('pl-PL')}
-                              {order.sentAt && ` • Wysłane: ${new Date(order.sentAt).toLocaleDateString('pl-PL')}`}
-                            </p>
-                            <p className="text-sm text-gray-600">
-                              Pozycje: {order.items.length} • Łącznie: {totalQty} szt.
-                            </p>
-                          </div>
-                          <div className="flex gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleExportOrder(order.id)}
-                              className="gap-2"
-                            >
-                              <Download className="w-4 h-4" />
-                              Eksportuj
-                            </Button>
-                            {order.status === 'draft' && (
-                              <Button
-                                size="sm"
-                                onClick={() => handleSendOrder(order.id)}
-                                className="gap-2"
-                              >
-                                <Send className="w-4 h-4" />
-                                Oznacz jako wysłane
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-                {consolidatedOrders.length === 0 && (
-                  <div className="text-center py-8 text-gray-500">
-                    Brak zamówień konsolidacyjnych
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+      </div>
     </div>
   );
 }

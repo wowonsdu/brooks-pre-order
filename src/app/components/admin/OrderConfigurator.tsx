@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router';
-import { mockPreorders, mockProducts, mockConsolidatedOrders, mockUsers } from '../../lib/mock-data';
+import { mockProducts } from '../../lib/mock-data';
+import { usePreorders, useCustomers, addConsolidatedOrders } from '../../lib/demo-store';
 import type { ConsolidatedOrder } from '../../lib/mock-data';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
@@ -21,6 +22,7 @@ interface ConsolidatedItemFull {
   quantity: number;
   byPriority: Record<number, number>;
   byMonth: Record<string, number>;
+  byPriorityMonth: Record<string, number>;
   byCustomer: Record<string, { name: string; company: string; qty: number; priority: number }>;
   preorderIds: string[];
 }
@@ -39,6 +41,8 @@ interface OrderDraft {
 export function OrderConfigurator() {
   const navigate = useNavigate();
   const selectedBrand = 'Brooks';
+  const preorders = usePreorders();
+  const customers = useCustomers().filter((user) => user.role === 'b2b_customer');
 
   // Filter state
   const [selectedPriorities, setSelectedPriorities] = useState<Set<number>>(new Set());
@@ -46,11 +50,11 @@ export function OrderConfigurator() {
   const [selectedCustomers, setSelectedCustomers] = useState<Set<string>>(new Set());
 
   // Expandable sections
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['priority', 'month']));
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['quick', 'priority', 'month']));
 
   // Order drafts - multiple orders can be built
   const [orderDrafts, setOrderDrafts] = useState<OrderDraft[]>([]);
-  const [activeTab, setActiveTab] = useState<'preview' | 'drafts'>('preview');
+  const [activeTab, setActiveTab] = useState<'preview' | 'drafts' | 'unordered'>('preview');
 
   const toggleSection = (section: string) => {
     const next = new Set(expandedSections);
@@ -61,11 +65,10 @@ export function OrderConfigurator() {
   // Build full consolidation data
   const consolidatedItems = useMemo((): ConsolidatedItemFull[] => {
     const consolidated = new Map<string, ConsolidatedItemFull>();
-
-    mockPreorders
+    preorders
       .filter(po => po.status === 'pending')
       .forEach(preorder => {
-        const customer = mockUsers.find(u => u.id === preorder.customerId);
+        const customer = customers.find(u => u.id === preorder.customerId);
         preorder.items.forEach(item => {
           const product = mockProducts.find(p => p.id === item.productId);
           if (product?.brand !== selectedBrand) return;
@@ -80,6 +83,8 @@ export function OrderConfigurator() {
             existing.quantity += item.quantity;
             existing.byPriority[preorder.priority] = (existing.byPriority[preorder.priority] || 0) + item.quantity;
             existing.byMonth[month] = (existing.byMonth[month] || 0) + item.quantity;
+            const comboKey = `${preorder.priority}|${month}`;
+            existing.byPriorityMonth[comboKey] = (existing.byPriorityMonth[comboKey] || 0) + item.quantity;
             if (existing.byCustomer[preorder.customerId]) {
               existing.byCustomer[preorder.customerId].qty += item.quantity;
             } else {
@@ -100,6 +105,7 @@ export function OrderConfigurator() {
               quantity: item.quantity,
               byPriority: { [preorder.priority]: item.quantity },
               byMonth: { [month]: item.quantity },
+              byPriorityMonth: { [`${preorder.priority}|${month}`]: item.quantity },
               byCustomer: {
                 [preorder.customerId]: {
                   name: customer?.name || preorder.customerName,
@@ -115,7 +121,7 @@ export function OrderConfigurator() {
       });
 
     return Array.from(consolidated.values());
-  }, []);
+  }, [preorders, customers, mockProducts]);
 
   // Available filter options
   const availablePriorities = useMemo(() => {
@@ -168,17 +174,12 @@ export function OrderConfigurator() {
             }
           });
         } else if (hasPriorityFilter && hasMonthFilter) {
-          // Cross filter: priority × month (approximate proportional)
-          const totalQty = item.quantity;
-          let priorityRatio = 0;
-          let monthRatio = 0;
-          Object.entries(item.byPriority).forEach(([p, q]) => {
-            if (selectedPriorities.has(parseInt(p))) priorityRatio += q / totalQty;
+          Object.entries(item.byPriorityMonth).forEach(([comboKey, comboQty]) => {
+            const [priority, month] = comboKey.split('|');
+            if (selectedPriorities.has(parseInt(priority)) && selectedMonths.has(month)) {
+              qty += comboQty;
+            }
           });
-          Object.entries(item.byMonth).forEach(([m, q]) => {
-            if (selectedMonths.has(m)) monthRatio += q / totalQty;
-          });
-          qty = Math.round(totalQty * priorityRatio * monthRatio);
         } else if (hasPriorityFilter) {
           Object.entries(item.byPriority).forEach(([p, q]) => {
             if (selectedPriorities.has(parseInt(p))) qty += q;
@@ -207,6 +208,202 @@ export function OrderConfigurator() {
     const product = mockProducts.find(p => p.id === productId);
     const variant = product?.variants.find(v => v.id === variantId);
     return { product, variant };
+  };
+
+  const consolidatedByVariant = useMemo(() => {
+    const map = new Map<string, ConsolidatedItemFull>();
+    consolidatedItems.forEach(item => map.set(item.variantId, item));
+    return map;
+  }, [consolidatedItems]);
+
+  const orderedByVariantCombo = useMemo(() => {
+    const map = new Map<string, number>();
+    if (orderDrafts.length === 0) return map;
+
+    const splitByCombo = (itemDemandByCombo: Record<string, number>, draftQty: number, priorities: number[], months: string[]) => {
+      const prioritySet = new Set(priorities);
+      const monthSet = new Set(months);
+      const hasPriorityFilter = prioritySet.size > 0;
+      const hasMonthFilter = monthSet.size > 0;
+
+      const candidates = Object.entries(itemDemandByCombo)
+        .map(([comboKey, comboQty]) => {
+          const [priorityRaw, month] = comboKey.split('|');
+          const priority = parseInt(priorityRaw, 10);
+          if (hasPriorityFilter && !prioritySet.has(priority)) return null;
+          if (hasMonthFilter && !monthSet.has(month)) return null;
+          if (comboQty <= 0) return null;
+          return { comboKey, comboQty };
+        })
+        .filter(Boolean) as { comboKey: string; comboQty: number; }[];
+
+      if (candidates.length === 0 || draftQty <= 0) return new Map<string, number>();
+
+      const totalCandidateQty = candidates.reduce((sum, c) => sum + c.comboQty, 0);
+      const normalizedDraftQty = Math.min(draftQty, totalCandidateQty);
+      const rows = candidates.map(candidate => {
+        const exact = normalizedDraftQty * (candidate.comboQty / totalCandidateQty);
+        const base = Math.floor(exact);
+        return { comboKey: candidate.comboKey, base, frac: exact - base };
+      });
+
+      let remaining = normalizedDraftQty - rows.reduce((sum, row) => sum + row.base, 0);
+      rows.sort((a, b) => b.frac - a.frac);
+      for (let i = 0; i < rows.length && remaining > 0; i += 1) {
+        rows[i].base += 1;
+        remaining -= 1;
+      }
+
+      const result = new Map<string, number>();
+      rows.forEach(row => {
+        if (row.base > 0) {
+          result.set(row.comboKey, row.base);
+        }
+      });
+      return result;
+    };
+
+    orderDrafts.forEach(draft => {
+      draft.items.forEach(draftItem => {
+        const demandItem = consolidatedByVariant.get(draftItem.variantId);
+        if (!demandItem) return;
+
+        const allocation = splitByCombo(
+          demandItem.byPriorityMonth,
+          draftItem.quantity,
+          draft.filters.priorities,
+          draft.filters.months
+        );
+
+        allocation.forEach((qty, comboKey) => {
+          const mapKey = `${draftItem.variantId}|${comboKey}`;
+          map.set(mapKey, (map.get(mapKey) || 0) + qty);
+        });
+      });
+    });
+
+    return map;
+  }, [orderDrafts, consolidatedByVariant]);
+
+  const orderedByVariant = useMemo(() => {
+    const map = new Map<string, number>();
+    orderDrafts.forEach(draft => {
+      draft.items.forEach(item => {
+        map.set(item.variantId, (map.get(item.variantId) || 0) + item.quantity);
+      });
+    });
+    return map;
+  }, [orderDrafts]);
+
+  const unorderedItems = useMemo(() => {
+    return consolidatedItems
+      .map(item => {
+        const ordered = orderedByVariant.get(item.variantId) || 0;
+        const remainingQty = Math.max(item.quantity - ordered, 0);
+        if (remainingQty <= 0) return null;
+
+        return { ...item, quantity: remainingQty };
+      })
+      .filter(Boolean) as ConsolidatedItemFull[];
+  }, [consolidatedItems, orderedByVariant]);
+
+  const unorderedTotalsQty = unorderedItems.reduce((sum, item) => sum + item.quantity, 0);
+  const unorderedTotalsValue = unorderedItems.reduce((sum, item) => {
+    const product = mockProducts.find(pr => pr.id === item.productId);
+    return sum + item.quantity * (product?.basePrice || 0);
+  }, 0);
+
+  interface UnorderedComboRow {
+    priority: number;
+    month: string;
+    quantity: number;
+    items: {
+      variantId: string;
+      productId: string;
+      quantity: number;
+    }[];
+  }
+
+  const unorderedCombinations = useMemo(() => {
+    const map = new Map<string, UnorderedComboRow>();
+
+    consolidatedItems.forEach(item => {
+      Object.entries(item.byPriorityMonth).forEach(([comboKey, comboQty]) => {
+        const orderedComboQty = orderedByVariantCombo.get(`${item.variantId}|${comboKey}`) || 0;
+        const remaining = Math.max(comboQty - orderedComboQty, 0);
+        if (remaining <= 0) return;
+
+        const [priorityRaw, month] = comboKey.split('|');
+        const priority = parseInt(priorityRaw, 10);
+        const key = comboKey;
+        const existing = map.get(key);
+        if (existing) {
+          existing.quantity += remaining;
+          existing.items.push({
+            variantId: item.variantId,
+            productId: item.productId,
+            quantity: remaining,
+          });
+        } else {
+          map.set(key, {
+            priority,
+            month,
+            quantity: remaining,
+            items: [{
+              variantId: item.variantId,
+              productId: item.productId,
+              quantity: remaining,
+            }],
+          });
+        }
+      });
+    });
+
+    return Array.from(map.values()).sort((a, b) => a.priority - b.priority || a.month.localeCompare(b.month));
+  }, [consolidatedItems, orderedByVariantCombo]);
+
+  const addUnorderedCombinationToDraft = (combo: UnorderedComboRow) => {
+    if (combo.items.length === 0) return;
+
+    const draft: OrderDraft = {
+      id: `draft-combo-${combo.priority}-${combo.month}-${Date.now()}`,
+      name: `Brooks Europe (P${combo.priority} / ${combo.month})`,
+      filters: {
+        priorities: [combo.priority],
+        months: [combo.month],
+        customers: [],
+      },
+      items: combo.items,
+    };
+
+    if (draft.items.length === 0) return;
+
+    setOrderDrafts(prev => [...prev, draft]);
+    setActiveTab('drafts');
+    toast.success('Dodano pozycje z kombinacji do listy', {
+      description: draft.name,
+    });
+  };
+
+  const addAllUnorderedToDraft = () => {
+    if (unorderedItems.length === 0) return;
+
+    const draft: OrderDraft = {
+      id: `draft-unordered-${Date.now()}`,
+      name: 'Brooks Europe (Niezamówione)',
+      filters: { priorities: [], months: [], customers: [] },
+      items: unorderedItems.map(item => ({
+        variantId: item.variantId,
+        productId: item.productId,
+        quantity: item.quantity,
+      })),
+    };
+
+    setOrderDrafts(prev => [...prev, draft]);
+    setActiveTab('drafts');
+    toast.success('Dodano wszystkie niezamówione pozycje', {
+      description: draft.name,
+    });
   };
 
   const togglePriority = (p: number) => {
@@ -289,8 +486,7 @@ export function OrderConfigurator() {
       items: draft.items,
     }));
 
-    // In a real app this would update global state/db
-    mockConsolidatedOrders.push(...newOrders);
+    addConsolidatedOrders(newOrders);
     toast.success(`Utworzono ${newOrders.length} zamówień`, {
       description: `Łącznie ${newOrders.reduce((s, o) => s + o.items.reduce((ss, i) => ss + i.quantity, 0), 0)} szt.`,
     });
@@ -454,52 +650,42 @@ export function OrderConfigurator() {
             )}
           </div>
 
-          {/* Priority Section */}
+          {/* Quick Split */}
           <div className="border-b">
             <button
               className="w-full flex items-center justify-between p-4 hover:bg-gray-50 text-left"
-              onClick={() => toggleSection('priority')}
+              onClick={() => toggleSection('quick')}
             >
               <div className="flex items-center gap-2">
-                <Users className="w-4 h-4 text-gray-500" />
-                <span className="font-medium text-sm">Priorytet klienta</span>
+                <SplitSquareVertical className="w-4 h-4 text-gray-500" />
+                <span className="font-medium text-sm">Szybki podział</span>
               </div>
-              {expandedSections.has('priority') ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
+              {expandedSections.has('quick') ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
             </button>
-            {expandedSections.has('priority') && (
+            {expandedSections.has('quick') && (
               <div className="px-4 pb-4 space-y-2">
-                {availablePriorities.map(p => {
-                  const qty = consolidatedItems.reduce((s, i) => s + (i.byPriority[p] || 0), 0);
-                  const val = consolidatedItems.reduce((s, i) => {
-                    const pr = mockProducts.find(x => x.id === i.productId);
-                    return s + (i.byPriority[p] || 0) * (pr?.basePrice || 0);
-                  }, 0);
-                  const isSelected = selectedPriorities.has(p);
-                  return (
-                    <button
-                      key={p}
-                      onClick={() => togglePriority(p)}
-                      className={`w-full flex items-center justify-between p-3 rounded-lg border text-left transition-all ${
-                        isSelected
-                          ? `${priorityColors[p]} border-current ring-1 ring-current/20`
-                          : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <div className={`w-5 h-5 rounded border flex items-center justify-center text-xs ${
-                          isSelected ? 'bg-current/20 border-current' : 'border-gray-300'
-                        }`}>
-                          {isSelected && <Check className="w-3 h-3" />}
-                        </div>
-                        <span className="font-medium text-sm">Priorytet {p}</span>
-                      </div>
-                      <div className="text-right text-xs">
-                        <div className="font-semibold">{qty} szt.</div>
-                        <div className="text-gray-500">{val.toLocaleString('pl-PL')} EUR</div>
-                      </div>
-                    </button>
-                  );
-                })}
+                <Button variant="outline" size="sm" className="w-full justify-start text-xs" onClick={quickSplitByMonth}>
+                  <Calendar className="w-3 h-3 mr-2" />
+                  Osobne zamówienie per miesiąc
+                </Button>
+                <Button variant="outline" size="sm" className="w-full justify-start text-xs" onClick={quickSplitCombined}>
+                  <SplitSquareVertical className="w-3 h-3 mr-2" />
+                  miesiąc x priorytet (kombinowany)
+                </Button>
+                <Button variant="outline" size="sm" className="w-full justify-start text-xs" onClick={() => {
+                  clearAllFilters();
+                  setOrderDrafts([{
+                    id: `draft-full-${Date.now()}`,
+                    name: 'Brooks Europe - Pełna konsolidacja',
+                    filters: { priorities: [], months: [], customers: [] },
+                    items: consolidatedItems.map(i => ({ variantId: i.variantId, productId: i.productId, quantity: i.quantity })),
+                  }]);
+                  setActiveTab('drafts');
+                  toast.success('Utworzono jedno zamówienie całościowe');
+                }}>
+                  <Package className="w-3 h-3 mr-2" />
+                  Jedno zamówienie (całość)
+                </Button>
               </div>
             )}
           </div>
@@ -542,6 +728,56 @@ export function OrderConfigurator() {
                           {isSelected && <Check className="w-3 h-3" />}
                         </div>
                         <span className="font-medium text-sm capitalize">{m}</span>
+                      </div>
+                      <div className="text-right text-xs">
+                        <div className="font-semibold">{qty} szt.</div>
+                        <div className="text-gray-500">{val.toLocaleString('pl-PL')} EUR</div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Priority Section */}
+          <div className="border-b">
+            <button
+              className="w-full flex items-center justify-between p-4 hover:bg-gray-50 text-left"
+              onClick={() => toggleSection('priority')}
+            >
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-gray-500" />
+                <span className="font-medium text-sm">Priorytet klienta</span>
+              </div>
+              {expandedSections.has('priority') ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
+            </button>
+            {expandedSections.has('priority') && (
+              <div className="px-4 pb-4 space-y-2">
+                {availablePriorities.map(p => {
+                  const qty = consolidatedItems.reduce((s, i) => s + (i.byPriority[p] || 0), 0);
+                  const val = consolidatedItems.reduce((s, i) => {
+                    const pr = mockProducts.find(x => x.id === i.productId);
+                    return s + (i.byPriority[p] || 0) * (pr?.basePrice || 0);
+                  }, 0);
+                  const isSelected = selectedPriorities.has(p);
+                  return (
+                    <button
+                      key={p}
+                      onClick={() => togglePriority(p)}
+                      className={`w-full flex items-center justify-between p-3 rounded-lg border text-left transition-all ${
+                        isSelected
+                          ? `${priorityColors[p]} border-current ring-1 ring-current/20`
+                          : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className={`w-5 h-5 rounded border flex items-center justify-center text-xs ${
+                          isSelected ? 'bg-current/20 border-current' : 'border-gray-300'
+                        }`}>
+                          {isSelected && <Check className="w-3 h-3" />}
+                        </div>
+                        <span className="font-medium text-sm">Priorytet {p}</span>
                       </div>
                       <div className="text-right text-xs">
                         <div className="font-semibold">{qty} szt.</div>
@@ -602,50 +838,6 @@ export function OrderConfigurator() {
             )}
           </div>
 
-          {/* Quick Actions */}
-          <div className="border-b">
-            <button
-              className="w-full flex items-center justify-between p-4 hover:bg-gray-50 text-left"
-              onClick={() => toggleSection('quick')}
-            >
-              <div className="flex items-center gap-2">
-                <SplitSquareVertical className="w-4 h-4 text-gray-500" />
-                <span className="font-medium text-sm">Szybki podział</span>
-              </div>
-              {expandedSections.has('quick') ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
-            </button>
-            {expandedSections.has('quick') && (
-              <div className="px-4 pb-4 space-y-2">
-                <Button variant="outline" size="sm" className="w-full justify-start text-xs" onClick={quickSplitByPriority}>
-                  <Users className="w-3 h-3 mr-2" />
-                  Osobne zamówienia per priorytet
-                </Button>
-                <Button variant="outline" size="sm" className="w-full justify-start text-xs" onClick={quickSplitByMonth}>
-                  <Calendar className="w-3 h-3 mr-2" />
-                  Osobne zamówienia per miesiąc
-                </Button>
-                <Button variant="outline" size="sm" className="w-full justify-start text-xs" onClick={quickSplitCombined}>
-                  <SplitSquareVertical className="w-3 h-3 mr-2" />
-                  Priorytet x Miesiąc (kombinowany)
-                </Button>
-                <Button variant="outline" size="sm" className="w-full justify-start text-xs" onClick={() => {
-                  clearAllFilters();
-                  setOrderDrafts([{
-                    id: `draft-full-${Date.now()}`,
-                    name: 'Brooks Europe - Pełna konsolidacja',
-                    filters: { priorities: [], months: [], customers: [] },
-                    items: consolidatedItems.map(i => ({ variantId: i.variantId, productId: i.productId, quantity: i.quantity })),
-                  }]);
-                  setActiveTab('drafts');
-                  toast.success('Utworzono jedno zamówienie całościowe');
-                }}>
-                  <Package className="w-3 h-3 mr-2" />
-                  Jedno zamówienie (całość)
-                </Button>
-              </div>
-            )}
-          </div>
-
           {/* Add to drafts button */}
           <div className="p-4">
             <Button
@@ -689,6 +881,17 @@ export function OrderConfigurator() {
             >
               <ShoppingCart className="w-4 h-4 inline mr-2" />
               Zamówienia ({orderDrafts.length})
+            </button>
+            <button
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'unordered'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+              onClick={() => setActiveTab('unordered')}
+            >
+              <Package className="w-4 h-4 inline mr-2" />
+              Niezamówione ({unorderedItems.length} pozycji)
             </button>
           </div>
 
@@ -854,7 +1057,7 @@ export function OrderConfigurator() {
             </div>
           )}
 
-          {activeTab === 'drafts' && (
+            {activeTab === 'drafts' && (
             <div className="p-6 space-y-4">
               {orderDrafts.length === 0 ? (
                 <div className="text-center py-16 text-gray-500">
@@ -949,6 +1152,100 @@ export function OrderConfigurator() {
                             }, 0), 0).toLocaleString('pl-PL')} EUR
                           </p>
                         </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'unordered' && (
+            <div className="p-6 space-y-4">
+              {unorderedItems.length === 0 ? (
+                <div className="text-center py-16 text-gray-500">
+                  <Package className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                  <p className="font-medium mb-1">Brak niezamówionych pozycji</p>
+                  <p className="text-sm">
+                    Wszystkie pozycje zostały już dodane do zamówień w kolejce
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between">
+                    <h2 className="font-semibold text-gray-900">Niezamówione pozycje</h2>
+                    <Button size="sm" onClick={addAllUnorderedToDraft} className="gap-2">
+                      <Plus className="w-3 h-3" />
+                      Dodaj wszystkie ({unorderedItems.length}) pozycje
+                    </Button>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    <Card>
+                      <CardContent className="p-4">
+                        <p className="text-xs text-gray-500">Niezamówione pozycje</p>
+                        <p className="text-xl font-semibold">{unorderedItems.length}</p>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardContent className="p-4">
+                        <p className="text-xs text-gray-500">Łączna ilość</p>
+                        <p className="text-xl font-semibold">{unorderedTotalsQty.toLocaleString('pl-PL')} szt.</p>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardContent className="p-4">
+                        <p className="text-xs text-gray-500">Łączna wartość</p>
+                        <p className="text-xl font-semibold">{unorderedTotalsValue.toLocaleString('pl-PL')} EUR</p>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm">Niezamówione kombinacje (priorytet × miesiąc)</CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      <div className="overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="text-xs">Priorytet</TableHead>
+                              <TableHead className="text-xs">Miesiąc</TableHead>
+                              <TableHead className="text-xs text-right">Ilość pozycji</TableHead>
+                              <TableHead className="text-xs text-right">Ilość sztuk</TableHead>
+                              <TableHead className="text-xs text-right">Akcje</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {unorderedCombinations.map(combo => (
+                              <TableRow key={`${combo.priority}-${combo.month}`}>
+                                <TableCell className="text-xs">P{combo.priority}</TableCell>
+                                <TableCell className="text-xs">{combo.month}</TableCell>
+                                <TableCell className="text-xs text-right">{combo.items.length}</TableCell>
+                                <TableCell className="text-xs text-right">{combo.quantity} szt.</TableCell>
+                                <TableCell className="text-right">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => addUnorderedCombinationToDraft(combo)}
+                                    className="gap-2"
+                                  >
+                                    <Plus className="w-3 h-3" />
+                                    Dodaj
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                            {unorderedCombinations.length === 0 && (
+                              <TableRow>
+                                <TableCell colSpan={5} className="text-center text-xs text-gray-500 py-3">
+                                  Brak ruchów niezamówionych
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </TableBody>
+                        </Table>
                       </div>
                     </CardContent>
                   </Card>

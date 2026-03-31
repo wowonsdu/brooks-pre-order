@@ -1,4 +1,4 @@
-import { mockPreorders, mockDeliveries, mockConsolidatedOrders } from '../../lib/mock-data';
+import { useConsolidatedOrders, useDeliveries, usePreorders } from '../../lib/demo-store';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { useNavigate } from 'react-router';
@@ -15,17 +15,21 @@ import {
 
 export function AdminDashboard() {
   const navigate = useNavigate();
+  const preorders = usePreorders();
+  const consolidatedOrders = useConsolidatedOrders();
+  const deliveries = useDeliveries();
 
   // Calculate stats
-  const totalPreorders = mockPreorders.length;
-  const pendingPreorders = mockPreorders.filter(p => p.status === 'pending').length;
-  const totalItems = mockPreorders.reduce((sum, po) => 
-    sum + po.items.reduce((s, item) => s + item.quantity, 0), 0
+  const totalPreorders = preorders.length;
+  const pendingPreorders = preorders.filter(p => p.status === 'pending').length;
+  const totalItems = preorders.reduce((sum, po) => 
+    sum + po.items.reduce((s, item) => s + item.quantity, 0),
+    0
   );
   
-  const activeDeliveries = mockDeliveries.filter(d => d.status === 'announced' || d.status === 'in_allocation').length;
-  const consolidatedOrders = mockConsolidatedOrders.length;
-  const sentOrders = mockConsolidatedOrders.filter(co => co.status === 'sent' || co.status === 'confirmed').length;
+  const activeDeliveries = deliveries.filter(d => d.status === 'announced' || d.status === 'in_allocation').length;
+  const totalConsolidatedOrders = consolidatedOrders.length;
+  const sentOrders = consolidatedOrders.filter(co => co.status === 'sent' || co.status === 'confirmed').length;
 
   const stats = [
     {
@@ -56,16 +60,16 @@ export function AdminDashboard() {
     {
       title: 'Wysłane Zamówienia',
       value: sentOrders,
-      total: consolidatedOrders,
+      total: totalConsolidatedOrders,
       icon: FileText,
       color: 'text-green-600',
       bgColor: 'bg-green-50',
-      action: () => navigate('/admin/consolidation'),
+      action: () => navigate('/admin/order-history'),
     },
   ];
 
-  const recentPreorders = mockPreorders.slice(0, 5);
-  const upcomingDeliveries = mockDeliveries.filter(d => d.status === 'announced').slice(0, 3);
+  const recentPreorders = preorders.slice(0, 5);
+  const upcomingDeliveries = deliveries.filter(d => d.status === 'announced').slice(0, 3);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -204,15 +208,15 @@ export function AdminDashboard() {
           <CardTitle>Szybkie Akcje</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Button 
-              variant="outline" 
-              className="h-auto py-4 flex-col gap-2"
-              onClick={() => navigate('/admin/consolidation')}
-            >
-              <FileText className="w-6 h-6" />
-              <span>Nowa Konsolidacja</span>
-            </Button>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Button 
+                variant="outline" 
+                className="h-auto py-4 flex-col gap-2"
+                onClick={() => navigate('/admin/order-history')}
+              >
+                <FileText className="w-6 h-6" />
+                <span>Widok zamówień</span>
+              </Button>
             <Button 
               variant="outline" 
               className="h-auto py-4 flex-col gap-2"

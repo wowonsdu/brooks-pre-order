@@ -5,6 +5,7 @@ Repozytorium buduje demonstracyjny system preorderów B2B dla obuwia.
 Projekt ma dwa flowy:
 - `Customer` (kupujący B2B): przegląd katalogu, koszyk, składanie preorderu, śledzenie statusu.
 - `Admin`: obsługa preorderów, konsolidacja, dodanie awizacji dostawy, alokacja towaru, zarządzanie priorytetami klientów.
+- Rozdzielenie ekranów: `/admin/preorders` (lista preorderów) oraz `/admin/order-history` (widok zamówień powstałych z konsolidacji).
 
 ## Routing i główne trasy
 - `"/"` → `HomePage` (przekierowanie do loginu / dashboardu po zalogowaniu),
@@ -13,8 +14,9 @@ Projekt ma dwa flowy:
 - `"/cart"` → `CartPage`,
 - `"/my-orders"` → `MyOrdersPage`,
 - `"/admin"` → `AdminDashboard`,
-- `"/admin/preorders"` → `PreordersListPage`,
+- `"/admin/preorders"` → `PreordersListPage` (Preordery - zamówienia klientów),
 - `"/admin/consolidation"` → `ConsolidationPage`,
+- `"/admin/order-history"` → `OrdersHistoryPage` (widok zamówień wygenerowanych z konsolidacji),
 - `"/admin/deliveries"` → `DeliveriesPage`,
 - `"/admin/allocation/:deliveryId"` → `AllocationPage`,
 - `"/admin/customers"` → `CustomersManagementPage`,
@@ -29,6 +31,7 @@ Projekt ma dwa flowy:
   - `id`, `email`, `name`, `role` (`admin` | `b2b_customer`), `companyName`, `priority`.
 - `Preorder`:
   - `id`, `orderNumber`, `customerId`, `items`, `status` (`pending`, `partially_allocated`, `allocated`, `partially_delivered`, `completed`, `cancelled`), daty, uwagi.
+  - `customerPriority`, `priority`, `allocationOrder` (domyślnie klienta, potem edytowane na poziomie preorderu), `seasonWindow`, `deliveryMonth`.
 - `Delivery`:
   - `id`, `deliveryNumber`, `supplier`, `brand`, `status` (`announced`, `in_allocation`, `allocated`, `received`), `items`, numery faktury, daty.
 - `ConsolidatedOrder`:
@@ -52,9 +55,18 @@ Projekt ma dwa flowy:
 - admin:
   - podgląd metryk i list preorderów,
   - konsolidacja zamówień po wariantach (produkty, kolory, rozmiary),
+  - historia zamówień wygenerowanych z konsolidacji,
   - tworzenie/zapis awizacji dostaw,
+  - import i dopasowanie pliku awizacji CSV do zamówień + prefill alokacji,
   - alokacja towaru do preorderów wg priorytetu i ręczna korekta,
   - ustawianie priorytetów klientów.
+- Konfiguracja priorytetów:
+  - Klient ma domyślny `customerPriority`.
+  - Każdy preorder może mieć własny `priority` (edytowalny).
+  - Lista preorderów ma dodatkowy `allocationOrder` z ręczną zmianą kolejności (drag & drop / strzałki) i służy do sekwencyjnej alokacji.
+- Sezony:
+  - Wiosenny: listopad–marzec (`10,11,0,1,2`)
+  - Zimowy: maj–wrzesień (`4,5,6,7,8`)
 
 ## Stan projektu (na dziś)
 - prototyp działający front-endowo,

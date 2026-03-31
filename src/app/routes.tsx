@@ -18,6 +18,7 @@ import { DeliveriesPage } from "./components/admin/DeliveriesPage";
 import { AllocationPage } from "./components/admin/AllocationPage";
 import { CustomersManagementPage } from "./components/admin/CustomersManagementPage";
 import { OrderConfigurator } from "./components/admin/OrderConfigurator";
+import { OrdersHistoryPage } from "./components/admin/OrdersHistoryPage";
 
 export const router = createBrowserRouter([
   {
@@ -40,6 +41,7 @@ export const router = createBrowserRouter([
           { path: "admin", Component: AdminDashboard },
           { path: "admin/preorders", Component: PreordersListPage },
           { path: "admin/consolidation", Component: ConsolidationPage },
+          { path: "admin/order-history", Component: OrdersHistoryPage },
           { path: "admin/deliveries", Component: DeliveriesPage },
           { path: "admin/allocation/:deliveryId", Component: AllocationPage },
           { path: "admin/customers", Component: CustomersManagementPage },

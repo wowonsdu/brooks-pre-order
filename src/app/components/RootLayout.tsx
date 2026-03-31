@@ -42,6 +42,7 @@ export function RootLayout() {
     { path: '/admin', label: 'Dashboard', icon: LayoutDashboard },
     { path: '/admin/preorders', label: 'Preordery', icon: ClipboardList },
     { path: '/admin/consolidation', label: 'Konsolidacja', icon: FileText },
+    { path: '/admin/order-history', label: 'Widok zamówień', icon: FileText },
     { path: '/admin/deliveries', label: 'Dostawy', icon: Truck },
     { path: '/admin/customers', label: 'Klienci', icon: Users },
   ];

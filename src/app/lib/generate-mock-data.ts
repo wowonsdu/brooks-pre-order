@@ -60,6 +60,17 @@ function randomInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+const SEASON_WINDOWS = [
+  {
+    seasonWindow: 'spring' as const,
+    months: [10, 11, 0, 1, 2],
+  },
+  {
+    seasonWindow: 'winter' as const,
+    months: [4, 5, 6, 7, 8],
+  },
+] as const;
+
 function shuffleArray<T>(array: T[]): T[] {
   const result = [...array];
   for (let i = result.length - 1; i > 0; i--) {
@@ -176,6 +187,8 @@ export function generatePreorders(customers: User[], products: Product[]): Preor
       const preorderId = `preorder_${preorders.length + 1}`;
       const orderNumber = `PO-2026-${String(preorders.length + 1).padStart(4, '0')}`;
       const numItems = randomInt(25, 65);
+      const seasonWindow = SEASON_WINDOWS[(customerIndex + i) % SEASON_WINDOWS.length];
+      const monthIndex = seasonWindow.months[(i + customerIndex) % seasonWindow.months.length];
       
       // Select random variants for this preorder
       const selectedVariants = shuffleArray(allVariants).slice(0, numItems);
@@ -205,6 +218,9 @@ export function generatePreorders(customers: User[], products: Product[]): Preor
         customerName: customer.name,
         companyName: customer.companyName!,
         priority: customer.priority!,
+        customerPriority: customer.priority!,
+        seasonWindow: seasonWindow.seasonWindow,
+        deliveryMonth: monthIndex,
         items,
         status: 'pending',
         createdAt: new Date(2026, creationMonth, randomInt(1, 28)).toISOString(),
@@ -212,8 +228,17 @@ export function generatePreorders(customers: User[], products: Product[]): Preor
       });
     }
   });
-  
-  return preorders;
+
+  const sorted = [...preorders].sort((a, b) => {
+    if (a.priority !== b.priority) return a.priority - b.priority;
+    return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+  });
+
+  sorted.forEach((preorder, index) => {
+    preorder.allocationOrder = index + 1;
+  });
+
+  return sorted;
 }
 
 // Generate consolidated orders based on preorders

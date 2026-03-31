@@ -1,15 +1,13 @@
-import { useState, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router';
-import { mockDeliveries, mockPreorders, mockProducts, Preorder, PreorderItem } from '../../lib/mock-data';
+import { useState } from 'react';
+import { useParams, useNavigate, useLocation } from 'react-router';
+import { mockProducts } from '../../lib/mock-data';
+import { applyDeliveryAllocation, useDeliveries, usePreorders } from '../../lib/demo-store';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
-import { Slider } from '../ui/slider';
-import { Switch } from '../ui/switch';
-import { Separator } from '../ui/separator';
 import { 
   ArrowLeft, 
   ArrowUp, 
@@ -35,12 +33,27 @@ interface AllocationEntry {
   allocationPercentage: number;
 }
 
+type AwizmentMatch = {
+  orderId: string;
+  orderNumber: string;
+  requested: number;
+};
+
+type AllocationState = {
+  awizementAllocationPlan?: Record<string, AwizmentMatch[]>;
+};
+
 export function AllocationPage() {
   const { deliveryId } = useParams<{ deliveryId: string }>();
   const navigate = useNavigate();
-  const [autoAllocate, setAutoAllocate] = useState(true);
-  
-  const delivery = mockDeliveries.find(d => d.id === deliveryId);
+  const location = useLocation();
+  const allocationState = (location.state as AllocationState | undefined) || {};
+  const hasAwizment = !!(allocationState.awizementAllocationPlan && Object.keys(allocationState.awizementAllocationPlan).length > 0);
+  const [autoAllocate] = useState(!hasAwizment);
+  const deliveries = useDeliveries();
+  const preorders = usePreorders();
+
+  const delivery = deliveries.find(d => d.id === deliveryId);
 
   // Initialize allocations
   const [allocations, setAllocations] = useState<Map<string, AllocationEntry[]>>(() => {
@@ -52,7 +65,7 @@ export function AllocationPage() {
       // Find all preorders that ordered this variant
       const relevantPreorders: AllocationEntry[] = [];
 
-      mockPreorders
+      preorders
         .filter(po => po.status === 'pending' || po.status === 'partially_allocated')
         .forEach(preorder => {
           const item = preorder.items.find(i => i.variantId === deliveryItem.variantId);
@@ -78,14 +91,35 @@ export function AllocationPage() {
       // Sort by priority (lower number = higher priority)
       relevantPreorders.sort((a, b) => a.priority - b.priority);
 
-      // Auto-allocate if enabled
-      if (autoAllocate) {
-        let remainingQty = deliveryItem.quantityAnnounced;
-        relevantPreorders.forEach(entry => {
-          const toAllocate = Math.min(entry.quantityOrdered, remainingQty);
+      const awizmentAllocations = allocationState.awizementAllocationPlan?.[deliveryItem.variantId] || [];
+      let remainingQty = deliveryItem.quantityAnnounced;
+      const requestedByOrder = new Map<string, number>(awizmentAllocations.map(a => [a.orderId, a.requested]));
+
+      if (awizmentAllocations.length > 0) {
+        const prefilled = relevantPreorders.map(entry => {
+          const requested = requestedByOrder.get(entry.preorderId);
+          if (!requested) return entry;
+
+          const toAllocate = Math.min(remainingQty, requested, entry.quantityOrdered);
           entry.quantityAllocated = toAllocate;
-          entry.allocationPercentage = (toAllocate / entry.quantityOrdered) * 100;
+          entry.allocationPercentage = entry.quantityOrdered > 0 ? (toAllocate / entry.quantityOrdered) * 100 : 0;
           remainingQty -= toAllocate;
+          return entry;
+        });
+
+        relevantPreorders.length = 0;
+        relevantPreorders.push(...prefilled);
+      }
+
+      if (autoAllocate) {
+        let remainingForAuto = remainingQty;
+        relevantPreorders.forEach(entry => {
+          const toAllocate = Math.min(entry.quantityOrdered - entry.quantityAllocated, remainingForAuto);
+          if (toAllocate > 0) {
+            entry.quantityAllocated += toAllocate;
+            entry.allocationPercentage = entry.quantityOrdered > 0 ? (entry.quantityAllocated / entry.quantityOrdered) * 100 : 0;
+            remainingForAuto -= toAllocate;
+          }
         });
       }
 
@@ -150,12 +184,34 @@ export function AllocationPage() {
   };
 
   const handleSaveAllocation = () => {
+    if (!delivery) return;
+
+    const payload = Array.from(allocations.values()).flatMap((entries) =>
+      entries.map(entry => ({
+        preorderId: entry.preorderId,
+        variantId: entry.variantId,
+        quantityAllocated: entry.quantityAllocated,
+      }))
+    );
+
+    applyDeliveryAllocation(delivery.id, payload);
     toast.success('Alokacja zapisana', {
       description: 'Zmiany zostały zapisane jako wersja robocza',
     });
   };
 
   const handleFinalizeAllocation = () => {
+    if (!delivery) return;
+
+    const payload = Array.from(allocations.values()).flatMap((entries) =>
+      entries.map(entry => ({
+        preorderId: entry.preorderId,
+        variantId: entry.variantId,
+        quantityAllocated: entry.quantityAllocated,
+      }))
+    );
+
+    applyDeliveryAllocation(delivery.id, payload);
     toast.success('Alokacja zatwierdzona!', {
       description: 'Zamówienia zostały przekazane do Shopera i Firmao',
     });

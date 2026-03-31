@@ -51,10 +51,14 @@
   customerName: string
   companyName: string
   priority: number
+  customerPriority: number
+  allocationOrder?: number
   items: PreorderItem[]
   status: 'pending' | 'partially_allocated' | 'allocated' | 'partially_delivered' | 'completed' | 'cancelled'
   createdAt: string
   notes?: string
+  seasonWindow?: 'spring' | 'winter'
+  deliveryMonth?: number
 }
 ```
 `PreorderItem`:
@@ -100,8 +104,30 @@
   receivedDate?: string
   createdAt: string
   consolidatedOrderId?: string
+  matchedOrderSummary?: {
+    orderNumber: string
+    orderId?: string
+    companyName?: string
+    requested: number
+    totalOrderQuantity: number
+    allocationRate: number
+  }[]
+  awizementAllocationPlan?: Record<string, {
+    orderId: string
+    orderNumber: string
+    requested: number
+  }[]>
 }
 ```
+
+### 2.6 Kontrakt sezonu i priorytetów Preorderów
+- `deliveryMonth` (0–11) reprezentuje miesiąc dostawy wariantu wyciągnięty z danych produktu.
+- `seasonWindow` mapuje `deliveryMonth`:
+  - `spring`: `10,11,0,1,2` (listopad–marzec)
+  - `winter`: `4,5,6,7,8` (maj–wrzesień)
+- `customerPriority` pochodzi z konfiguracji klienta i jest domyślnym ustawieniem preorderu.
+- `priority` to aktualny priorytet preorderu, edytowalny w widoku preorderów.
+- `allocationOrder` to pozycja kolejności do planowania alokacji ręcznej.
 
 ### 2.5 Typ `User`
 ```ts
@@ -141,7 +167,10 @@ Reguła: `real_product=true` oznacza udane dopasowanie do crawlowego produktu; `
 - `MyOrdersPage`: odczyt preorderów bieżącego użytkownika (`mockPreorders` po `customerId`).
 - `ConsolidationPage`: agreguje tylko preordery `pending` wg `product.brand`.
 - `AllocationPage`: alokuje do preorderów wg `priority`; aktualizacja ilości nie może przekroczyć `quantityAnnounced`.
+- `AllocationPage`: wspiera `location.state.awizementAllocationPlan` i prefilluje alokację na start (procenty z pliku awizacji, z możliwością ręcznej korekty).
+- `DeliveriesPage`: importuje plik awizacji CSV, dopasowuje `ORDER_NUMBER` do `mockPreorders`, mapuje `EAN/SKU` na warianty i zapisuje `matchedOrderSummary` + `awizementAllocationPlan`.
 - `CustomersManagementPage`: edytuje priorytety 1..5.
+- `OrdersHistoryPage`: pokazuje listę obiektów `ConsolidatedOrder` (zamówienia źródłowe z konsolidacji), z filtrowaniem, eksportem CSV i ekspansją pozycji.
 
 ## 5) Statusy i przejścia
 ### 5.1 Status Preorder

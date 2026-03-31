@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { mockPreorders, mockProducts } from '../../lib/mock-data';
+import { getProductById, usePreorders } from '../../lib/demo-store';
 import { useAuth } from '../../lib/auth-context';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -9,9 +9,8 @@ import { Package, Clock, CheckCircle, XCircle } from 'lucide-react';
 
 export function MyOrdersPage() {
   const { user } = useAuth();
-  const [preorders] = useState(() => 
-    mockPreorders.filter(po => po.customerId === user?.id)
-  );
+  const allPreorders = usePreorders();
+  const preorders = allPreorders.filter(po => po.customerId === user?.id);
 
   const getStatusBadge = (status: string) => {
     const statusConfig = {
@@ -35,12 +34,12 @@ export function MyOrdersPage() {
   };
 
   const getProductDetails = (productId: string, variantId: string) => {
-    const product = mockProducts.find(p => p.id === productId);
+    const product = getProductById(productId);
     const variant = product?.variants.find(v => v.id === variantId);
     return { product, variant };
   };
 
-  const calculateProgress = (preorder: typeof mockPreorders[0]) => {
+  const calculateProgress = (preorder: typeof preorders[0]) => {
     const totalOrdered = preorder.items.reduce((sum, item) => sum + item.quantity, 0);
     const totalDelivered = preorder.items.reduce((sum, item) => sum + item.quantityDelivered, 0);
     return totalOrdered > 0 ? (totalDelivered / totalOrdered) * 100 : 0;

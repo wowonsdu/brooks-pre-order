@@ -17,3 +17,17 @@
   - brak API produkcyjnego i bazy,
   - lokalne JSON jako kontrakty danych (w zamienniku warstwy API),
   - sesja/koszyk dodatkowo w `localStorage`.
+- 2026-03-31: przywrócono `DeliveriesPage.tsx` i dodano obsługę awizacji CSV (dopasowanie ORDER_NUMBER + SKU/EAN do variantów, zapis podsumowania w `matchedOrderSummary` i planu `awizementAllocationPlan`), dodano przyciski przejścia do alokacji z prefill’em,
+  - zmieniono etykietę nawigacji admin na `Widok zamówień` (`/admin/preorders`),
+  - zaktualizowano `AllocationPage` do odczytu planu z `location.state`.
+
+- 2026-03-31: rozdzielono ekrany zamówień:
+  - `"/admin/preorders"` pozostaje listą preorderów klientów,
+  - dodano nowy ekran `"/admin/order-history"` jako historię `ConsolidatedOrder` tworzonych z konsolidacji,
+  - ustawiono oddzielne menu `Preordery` i `Historia zamówień`, plus mapowanie statystyk dashboardu na historię zamówień.
+- 2026-03-31: dopracowano plan działania preorderów wg dostarczonych wymagań:
+  - naprawiono tworzenie zamówień z konfiguratora (`addConsolidatedOrders` w store, poprawny re-render memoów),
+  - rozdzielono i odświeżono workflow edycji preorderów (drag&drop + priorytet per preorder) oraz listę filtrów w konfiguratorze,
+  - uporządkowano układ strony: szybki podział jako pierwszy filtr, potem miesiąc, priorytet, klient,
+  - nazwano ekran z historią jako `Widok zamówień`,
+  - zaktualizowano kontrakty i kontekst o `customerPriority`, `allocationOrder`, `seasonWindow`, `deliveryMonth` oraz reguły alokacji.

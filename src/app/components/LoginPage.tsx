@@ -1,21 +1,22 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useAuth } from '../lib/auth-context';
+import { useCustomersAll } from '../lib/demo-store';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Package } from 'lucide-react';
-import { mockUsers } from '../lib/mock-data';
 
 export function LoginPage() {
   const [email, setEmail] = useState('');
   const { login, user } = useAuth();
+  const users = useCustomersAll();
   const navigate = useNavigate();
 
   const handleLogin = (selectedEmail: string) => {
     login(selectedEmail);
-    const loggedUser = mockUsers.find(u => u.email === selectedEmail);
+    const loggedUser = users.find(u => u.email === selectedEmail);
     if (loggedUser?.role === 'admin') {
       navigate('/admin');
     } else {
@@ -50,7 +51,7 @@ export function LoginPage() {
               onChange={(e) => setEmail(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && email) {
-                  const user = mockUsers.find(u => u.email === email);
+                  const user = users.find(u => u.email === email);
                   if (user) handleLogin(email);
                 }
               }}
