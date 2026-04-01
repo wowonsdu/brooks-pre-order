@@ -64,3 +64,7 @@
   - dashboard renderuje panel review dla preorderów klientów zalegających z decyzją per preorder i per firma,
   - lista preorderów pokazuje badge `Zalega` i szczegóły zaległości w expandzie,
   - konsolidacja, konfigurator zamówień i alokacja pomijają preordery niedopuszczone do procesu.
+- 2026-04-01: dodano wsparcie deployu ścieżkowego dla `panel.ceo/brooks`:
+  - router używa `basename` z `import.meta.env.BASE_URL`,
+  - build Vite respektuje `VITE_PUBLIC_BASE_PATH`,
+  - usunięto twardą nawigację `window.location.href` do koszyka, żeby subpath nie był omijany.

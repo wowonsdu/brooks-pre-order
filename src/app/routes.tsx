@@ -20,37 +20,45 @@ import { CustomersManagementPage } from "./components/admin/CustomersManagementP
 import { OrderConfigurator } from "./components/admin/OrderConfigurator";
 import { OrdersHistoryPage } from "./components/admin/OrdersHistoryPage";
 
-export const router = createBrowserRouter([
-  {
-    path: "/",
-    Component: AuthWrapper,
-    children: [
-      {
-        path: "/",
-        Component: RootLayout,
-        children: [
-          { index: true, Component: HomePage },
-          { path: "login", Component: LoginPage },
-          
-          // B2B Customer Routes
-          { path: "catalog", Component: CatalogPage },
-          { path: "my-orders", Component: MyOrdersPage },
-          { path: "cart", Component: CartPage },
-          
-          // Admin Routes
-          { path: "admin", Component: AdminDashboard },
-          { path: "admin/preorders", Component: PreordersListPage },
-          { path: "admin/consolidation", Component: ConsolidationPage },
-          { path: "admin/order-history", Component: OrdersHistoryPage },
-          { path: "admin/deliveries", Component: DeliveriesPage },
-          { path: "admin/allocation/:deliveryId", Component: AllocationPage },
-          { path: "admin/customers", Component: CustomersManagementPage },
-          { path: "admin/order-configurator", Component: OrderConfigurator },
-          
-          // 404
-          { path: "*", Component: NotFoundPage },
-        ],
-      },
-    ],
-  },
-]);
+const routerBasename =
+  import.meta.env.BASE_URL === "/"
+    ? "/"
+    : import.meta.env.BASE_URL.replace(/\/$/, "");
+
+export const router = createBrowserRouter(
+  [
+    {
+      path: "/",
+      Component: AuthWrapper,
+      children: [
+        {
+          path: "/",
+          Component: RootLayout,
+          children: [
+            { index: true, Component: HomePage },
+            { path: "login", Component: LoginPage },
+            
+            // B2B Customer Routes
+            { path: "catalog", Component: CatalogPage },
+            { path: "my-orders", Component: MyOrdersPage },
+            { path: "cart", Component: CartPage },
+            
+            // Admin Routes
+            { path: "admin", Component: AdminDashboard },
+            { path: "admin/preorders", Component: PreordersListPage },
+            { path: "admin/consolidation", Component: ConsolidationPage },
+            { path: "admin/order-history", Component: OrdersHistoryPage },
+            { path: "admin/deliveries", Component: DeliveriesPage },
+            { path: "admin/allocation/:deliveryId", Component: AllocationPage },
+            { path: "admin/customers", Component: CustomersManagementPage },
+            { path: "admin/order-configurator", Component: OrderConfigurator },
+            
+            // 404
+            { path: "*", Component: NotFoundPage },
+          ],
+        },
+      ],
+    },
+  ],
+  { basename: routerBasename },
+);

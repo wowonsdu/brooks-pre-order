@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router';
 import { mockProducts, Product, ProductVariant } from '../../lib/mock-data';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
@@ -10,6 +11,7 @@ import { ShoppingCart, Plus, Search, Filter } from 'lucide-react';
 import { toast } from 'sonner';
 
 export function CatalogPage() {
+  const navigate = useNavigate();
   const [products] = useState(mockProducts);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedBrand, setSelectedBrand] = useState<string>('all');
@@ -54,7 +56,7 @@ export function CatalogPage() {
           <h1 className="text-3xl font-bold text-gray-900">Katalog Produktów</h1>
           <p className="text-gray-600 mt-1">Sezon Spring 2026 - Preorder</p>
         </div>
-        <Button className="gap-2" onClick={() => window.location.href = '/cart'}>
+        <Button className="gap-2" onClick={() => navigate('/cart')}>
           <ShoppingCart className="w-4 h-4" />
           Koszyk {cartItemsCount > 0 && `(${cartItemsCount})`}
         </Button>

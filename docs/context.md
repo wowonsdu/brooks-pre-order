@@ -21,6 +21,7 @@ Projekt ma dwa flowy:
 - `"/admin/allocation/:deliveryId"` → `AllocationPage`,
 - `"/admin/customers"` → `CustomersManagementPage`,
 - `"/admin/order-configurator"` → `OrderConfigurator`.
+- Routing działa też w deployu ścieżkowym dzięki `basename` opartemu o `import.meta.env.BASE_URL`, więc aplikację można bezpiecznie wystawić pod prefiksem typu `/brooks`.
 
 ## Kluczowe encje
 - `Product`:
@@ -40,6 +41,7 @@ Projekt ma dwa flowy:
 ## Model pracy demo
 - Brak bazy danych i backendu produkcyjnego.
 - Stan runtime jest pamiętany w pamięci i `localStorage` (`cart`, `currentUser`).
+- Build może być przygotowany pod subpath przez `VITE_PUBLIC_BASE_PATH`, np. `VITE_PUBLIC_BASE_PATH=/brooks npm run build`.
 - Dane wejściowe są mapowane do JSON:
   - `Grzesiek ... F26_PL_Delivery Overview.csv` (surowy arkusz),
   - `...scan.json` (wynik crawlingu strony),
