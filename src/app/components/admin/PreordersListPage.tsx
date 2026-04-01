@@ -1,73 +1,67 @@
-import { useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Preorder } from '../../lib/mock-data';
-import { getProductById, getSeasonLabel, reorderPreorders, setPreorderPriority, usePreorders } from '../../lib/demo-store';
+import { getDebtDecisionLabel, getDebtDurationLabel, getProductById, getSeasonLabel, isCustomerDelinquent, reorderPreorders, setPreorderAllocationPosition, useCustomers, usePreorders } from '../../lib/demo-store';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { Switch } from '../ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
-import { Search, Filter, Download, ChevronUp, ChevronDown, ArrowUp, ArrowDown, GripVertical } from 'lucide-react';
+import { Search, Filter, Download, ChevronUp, ChevronDown, GripVertical } from 'lucide-react';
 import React from 'react';
 
-type SortField = 'allocationOrder' | 'orderNumber' | 'customerName' | 'companyName' | 'priority' | 'items' | 'totalQuantity' | 'status' | 'createdAt' | 'deliveryMonth';
+type SortField = 'allocationOrder' | 'orderNumber' | 'customerName' | 'companyName' | 'customerPriority' | 'priority' | 'items' | 'totalQuantity' | 'status' | 'createdAt' | 'deliveryMonth';
 type SortDirection = 'asc' | 'desc';
 
 export function PreordersListPage() {
   const preorders = usePreorders();
+  const customers = useCustomers();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [deliveryMonthFilter, setDeliveryMonthFilter] = useState<string>('all');
+  const [groupByMonth, setGroupByMonth] = useState(false);
   const [expandedPreorder, setExpandedPreorder] = useState<string | null>(null);
-  const [primarySort, setPrimarySort] = useState<{ field: SortField; direction: SortDirection } | null>({ field: 'allocationOrder', direction: 'asc' });
-  const [secondarySort, setSecondarySort] = useState<{ field: SortField; direction: SortDirection } | null>(null);
+  const [sortConfig, setSortConfig] = useState<{ field: SortField; direction: SortDirection }>({ field: 'deliveryMonth', direction: 'asc' });
   const [draggedPreorderId, setDraggedPreorderId] = useState<string | null>(null);
+  const [dropTargetPreorderId, setDropTargetPreorderId] = useState<string | null>(null);
+  const dragStateRef = useRef<{ draggedId: string | null; dropTargetId: string | null }>({
+    draggedId: null,
+    dropTargetId: null,
+  });
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+
+  const preorderById = useMemo(
+    () => new Map(preorders.map((preorder) => [preorder.id, preorder])),
+    [preorders],
+  );
+  const customerById = useMemo(
+    () => new Map(customers.map((customer) => [customer.id, customer])),
+    [customers],
+  );
 
   const handleSort = (field: SortField) => {
-    // If clicking on primary sort field - toggle direction
-    if (primarySort?.field === field) {
-      if (primarySort.direction === 'asc') {
-        setPrimarySort({ field, direction: 'desc' });
-      } else {
-        // Toggle back to asc
-        setPrimarySort({ field, direction: 'asc' });
+    setSortConfig((current) => {
+      if (current.field === field) {
+        return {
+          field,
+          direction: current.direction === 'asc' ? 'desc' : 'asc',
+        };
       }
-    }
-    // If clicking on secondary sort field - toggle direction
-    else if (secondarySort?.field === field) {
-      if (secondarySort.direction === 'asc') {
-        setSecondarySort({ field, direction: 'desc' });
-      } else {
-        // Toggle back to asc
-        setSecondarySort({ field, direction: 'asc' });
-      }
-    }
-    // Clicking on a new field
-    else {
-      // Current secondary becomes primary, new field becomes secondary
-      if (secondarySort) {
-        setPrimarySort(secondarySort);
-      }
-      setSecondarySort({ field, direction: 'asc' });
-    }
+
+      return {
+        field,
+        direction: 'asc',
+      };
+    });
   };
 
   const getSortIcon = (field: SortField) => {
-    if (primarySort?.field === field) {
-      return (
-        <span className="inline-flex items-center ml-1">
-          {primarySort.direction === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-          <span className="text-xs ml-0.5">1</span>
-        </span>
-      );
-    }
-    if (secondarySort?.field === field) {
-      return (
-        <span className="inline-flex items-center ml-1">
-          {secondarySort.direction === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-          <span className="text-xs ml-0.5">2</span>
-        </span>
-      );
+    if (sortConfig.field === field) {
+      return sortConfig.direction === 'asc'
+        ? <ChevronUp className="ml-1 w-4 h-4" />
+        : <ChevronDown className="ml-1 w-4 h-4" />;
     }
     return null;
   };
@@ -80,6 +74,17 @@ export function PreordersListPage() {
     return getSeasonLabel(monthIndex);
   };
 
+  const availableDeliveryMonths = useMemo(() => {
+    const monthIndexes = Array.from(
+      new Set(preorders.map((preorder) => preorder.deliveryMonth).filter((month): month is number => month !== undefined))
+    ).sort((a, b) => a - b);
+
+    return monthIndexes.map((monthIndex) => ({
+      value: String(monthIndex),
+      label: getSeasonLabel(monthIndex),
+    }));
+  }, [preorders]);
+
   const filteredPreorders = preorders.filter(preorder => {
     const matchesSearch = 
       preorder.orderNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -87,11 +92,10 @@ export function PreordersListPage() {
       preorder.customerName.toLowerCase().includes(searchQuery.toLowerCase());
     
     const matchesStatus = statusFilter === 'all' || preorder.status === statusFilter;
+    const matchesDeliveryMonth = deliveryMonthFilter === 'all' || String(preorder.deliveryMonth ?? '') === deliveryMonthFilter;
     
-    return matchesSearch && matchesStatus;
+    return matchesSearch && matchesStatus && matchesDeliveryMonth;
   }).sort((a, b) => {
-    if (!primarySort) return 0;
-
     const getSortValue = (preorder: Preorder, field: SortField) => {
       switch (field) {
         case 'allocationOrder':
@@ -102,6 +106,8 @@ export function PreordersListPage() {
           return preorder.customerName;
         case 'companyName':
           return preorder.companyName;
+        case 'customerPriority':
+          return preorder.customerPriority ?? preorder.priority ?? 999;
         case 'priority':
           return preorder.priority;
         case 'items':
@@ -113,7 +119,7 @@ export function PreordersListPage() {
         case 'createdAt':
           return new Date(preorder.createdAt).getTime();
         case 'deliveryMonth':
-          return getDeliveryMonth(preorder);
+          return preorder.deliveryMonth ?? 99;
         default:
           return '';
       }
@@ -126,28 +132,75 @@ export function PreordersListPage() {
       return String(valA).localeCompare(String(valB));
     };
 
-    // Primary sort
-    const primaryValA = getSortValue(a, primarySort.field);
-    const primaryValB = getSortValue(b, primarySort.field);
-    let comparison = compareValues(primaryValA, primaryValB);
-    
-    if (primarySort.direction === 'desc') {
+    const sortValA = getSortValue(a, sortConfig.field);
+    const sortValB = getSortValue(b, sortConfig.field);
+    let comparison = compareValues(sortValA, sortValB);
+
+    if (sortConfig.direction === 'desc') {
       comparison = -comparison;
     }
 
-    // If primary values are equal, use secondary sort
-    if (comparison === 0 && secondarySort) {
-      const secondaryValA = getSortValue(a, secondarySort.field);
-      const secondaryValB = getSortValue(b, secondarySort.field);
-      comparison = compareValues(secondaryValA, secondaryValB);
-      
-      if (secondarySort.direction === 'desc') {
-        comparison = -comparison;
-      }
+    if (comparison !== 0) {
+      return comparison;
     }
 
-    return comparison;
+    return (a.deliveryMonth ?? 99) - (b.deliveryMonth ?? 99)
+      || (a.allocationOrder ?? 999) - (b.allocationOrder ?? 999)
+      || a.orderNumber.localeCompare(b.orderNumber);
   });
+
+  const monthPriorityById = useMemo(() => {
+    const ordered = [...preorders].sort((a, b) =>
+      (a.deliveryMonth ?? 99) - (b.deliveryMonth ?? 99)
+      || (a.allocationOrder ?? 999) - (b.allocationOrder ?? 999)
+      || a.orderNumber.localeCompare(b.orderNumber)
+    );
+    const counters = new Map<number, number>();
+    const positions = new Map<string, number>();
+
+    ordered.forEach((preorder) => {
+      const monthIndex = preorder.deliveryMonth ?? 99;
+      const nextPosition = (counters.get(monthIndex) ?? 0) + 1;
+      counters.set(monthIndex, nextPosition);
+      positions.set(preorder.id, nextPosition);
+    });
+
+    return positions;
+  }, [preorders]);
+
+  const monthCountByIndex = useMemo(() => {
+    const counts = new Map<number, number>();
+
+    preorders.forEach((preorder) => {
+      const monthIndex = preorder.deliveryMonth ?? 99;
+      counts.set(monthIndex, (counts.get(monthIndex) ?? 0) + 1);
+    });
+
+    return counts;
+  }, [preorders]);
+
+  const groupedPreorders = useMemo(() => {
+    const groups = new Map<string, { monthLabel: string; monthIndex: number; items: Preorder[] }>();
+
+    filteredPreorders.forEach((preorder) => {
+      const monthIndex = preorder.deliveryMonth ?? 99;
+      const key = String(monthIndex);
+      const existing = groups.get(key);
+
+      if (existing) {
+        existing.items.push(preorder);
+        return;
+      }
+
+      groups.set(key, {
+        monthLabel: getDeliveryMonth(preorder),
+        monthIndex,
+        items: [preorder],
+      });
+    });
+
+    return Array.from(groups.values()).sort((a, b) => a.monthIndex - b.monthIndex);
+  }, [filteredPreorders]);
 
   const getStatusBadge = (status: string) => {
     const statusMap = {
@@ -163,6 +216,19 @@ export function PreordersListPage() {
     return <Badge variant={config.variant}>{config.label}</Badge>;
   };
 
+  const getDebtDecisionBadge = (preorder: Preorder) => {
+    if (preorder.debtDecision === 'rejected') {
+      return <Badge variant="destructive">Wstrzymane</Badge>;
+    }
+    if (preorder.debtDecision === 'pending_review') {
+      return <Badge variant="outline" className="border-orange-300 bg-orange-50 text-orange-700">Review</Badge>;
+    }
+    if (preorder.debtDecision === 'approved') {
+      return <Badge variant="outline" className="border-green-300 bg-green-50 text-green-700">Dopuszczone</Badge>;
+    }
+    return null;
+  };
+
   const getPriorityBadge = (priority: number) => {
     const colors = {
       1: 'bg-red-100 text-red-800',
@@ -171,7 +237,7 @@ export function PreordersListPage() {
       4: 'bg-green-100 text-green-800',
       5: 'bg-blue-100 text-blue-800',
     };
-    
+
     return (
       <Badge variant="outline" className={colors[priority as keyof typeof colors] || 'bg-gray-100 text-gray-800'}>
         P{priority}
@@ -185,60 +251,110 @@ export function PreordersListPage() {
     return { product, variant };
   };
 
-  const moveOrderUp = (preorderId: string, index: number, list: Preorder[]) => {
-    if (index <= 0) return;
-    const targetPreorder = list[index - 1];
-    if (!targetPreorder) return;
-    reorderPreorders(preorderId, targetPreorder.id);
+  const renderDebtSummary = (preorder: Preorder) => {
+    const customer = customerById.get(preorder.customerId);
+    const isDelinquent = isCustomerDelinquent(customer);
+
+    return (
+      <div className={`mb-4 rounded-lg border px-4 py-3 ${isDelinquent ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-white'}`}>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {isDelinquent ? <Badge variant="destructive">Zalega</Badge> : <Badge variant="outline">Brak zaległości</Badge>}
+              {getDebtDecisionBadge(preorder)}
+            </div>
+            <div className="grid gap-1 text-sm text-gray-700">
+              <div>Czy zalega: <span className="font-medium">{isDelinquent ? 'Tak' : 'Nie'}</span></div>
+              <div>Ile zalega: <span className="font-medium">{isDelinquent ? `${(customer?.debtAmountPln ?? 0).toLocaleString('pl-PL')} PLN` : '0 PLN'}</span></div>
+              <div>Jak długo: <span className="font-medium">{isDelinquent ? getDebtDurationLabel(customer?.debtSince) : '0 dni'}</span></div>
+              <div>Pozwól na zamówienia: <span className="font-medium">{customer?.allowOrders === false ? 'Nie' : 'Tak'}</span></div>
+            </div>
+          </div>
+          <div className="space-y-1 text-sm text-gray-700 lg:text-right">
+            <div>Status review: <span className="font-medium">{getDebtDecisionLabel(preorder.debtDecision)}</span></div>
+            {preorder.debtDecisionAt && (
+              <div>Decyzja: <span className="font-medium">{new Date(preorder.debtDecisionAt).toLocaleDateString('pl-PL')}</span></div>
+            )}
+            {preorder.debtDecisionBy && (
+              <div>Przez: <span className="font-medium">{preorder.debtDecisionBy}</span></div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
   };
 
-  const moveOrderDown = (preorderId: string, index: number, list: Preorder[]) => {
-    if (index >= list.length - 1) return;
-    const targetPreorder = list[index + 1];
-    if (!targetPreorder) return;
-    reorderPreorders(preorderId, targetPreorder.id);
-  };
-
-  const handlePreorderPriorityChange = (preorderId: string, value: string) => {
-    const priority = Number.parseInt(value, 10);
-    if (!Number.isFinite(priority)) {
+  const handlePreorderPositionChange = (preorderId: string, value: string) => {
+    const position = Number.parseInt(value, 10);
+    if (!Number.isFinite(position)) {
       return;
     }
-    setPreorderPriority(preorderId, priority);
+    setPreorderAllocationPosition(preorderId, position);
   };
 
-  const handleDragStart = (event: React.DragEvent, preorderId: string) => {
-    const target = event.target as HTMLElement | null;
-    const isDragHandle = target?.closest('[data-drag-handle="true"]') !== null;
-    if (!isDragHandle) {
-      event.preventDefault();
+  const updateDraggedDropTarget = (targetPreorderId: string | null) => {
+    const draggedId = dragStateRef.current.draggedId;
+    if (!draggedId || !targetPreorderId || draggedId === targetPreorderId) {
       return;
     }
 
-    event.dataTransfer.setData('text/plain', preorderId);
-    event.dataTransfer.effectAllowed = 'move';
+    const draggedPreorder = preorderById.get(draggedId);
+    const targetPreorder = preorderById.get(targetPreorderId);
+    if (!draggedPreorder || !targetPreorder) {
+      return;
+    }
+
+    if ((draggedPreorder.deliveryMonth ?? 99) !== (targetPreorder.deliveryMonth ?? 99)) {
+      return;
+    }
+
+    dragStateRef.current.dropTargetId = targetPreorderId;
+    setDropTargetPreorderId(targetPreorderId);
+  };
+
+  const handleMouseDragStart = (event: React.MouseEvent<HTMLElement>, preorderId: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    dragCleanupRef.current?.();
+    dragStateRef.current.draggedId = preorderId;
+    dragStateRef.current.dropTargetId = preorderId;
     setDraggedPreorderId(preorderId);
-  };
+    setDropTargetPreorderId(preorderId);
 
-  const handleDragOver = (event: React.DragEvent) => {
-    event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
-  };
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'grabbing';
 
-  const handleDrop = (event: React.DragEvent, targetPreorderId: string) => {
-    event.preventDefault();
-    const sourcePreorderId = event.dataTransfer.getData('text/plain') || draggedPreorderId;
-    if (!sourcePreorderId || sourcePreorderId === targetPreorderId) {
+    const updateMouseTarget = (mouseEvent: MouseEvent) => {
+      const target = document.elementFromPoint(mouseEvent.clientX, mouseEvent.clientY);
+      const row = target?.closest('[data-preorder-row-id]') as HTMLElement | null;
+      updateDraggedDropTarget(row?.dataset.preorderRowId ?? null);
+    };
+
+    const cleanupMouseDrag = () => {
+      window.removeEventListener('mousemove', updateMouseTarget);
+      window.removeEventListener('mouseup', finalizeMouseDrag);
+      dragCleanupRef.current = null;
+      document.body.style.removeProperty('user-select');
+      document.body.style.removeProperty('cursor');
+      dragStateRef.current.draggedId = null;
+      dragStateRef.current.dropTargetId = null;
       setDraggedPreorderId(null);
-      return;
-    }
+      setDropTargetPreorderId(null);
+    };
 
-    reorderPreorders(sourcePreorderId, targetPreorderId);
-    setDraggedPreorderId(null);
-  };
+    const finalizeMouseDrag = () => {
+      const targetPreorderId = dragStateRef.current.dropTargetId;
+      if (targetPreorderId && targetPreorderId !== preorderId) {
+        reorderPreorders(preorderId, targetPreorderId);
+      }
 
-  const handleDragEnd = () => {
-    setDraggedPreorderId(null);
+      cleanupMouseDrag();
+    };
+
+    window.addEventListener('mousemove', updateMouseTarget);
+    window.addEventListener('mouseup', finalizeMouseDrag);
+    dragCleanupRef.current = cleanupMouseDrag;
   };
 
   const exportToCSV = () => {
@@ -265,7 +381,7 @@ export function PreordersListPage() {
       {/* Filters */}
       <Card className="mb-6">
         <CardContent className="pt-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="md:col-span-2">
               <Label htmlFor="search" className="mb-2 flex items-center gap-2">
                 <Search className="w-4 h-4" />
@@ -298,8 +414,36 @@ export function PreordersListPage() {
                 </SelectContent>
               </Select>
             </div>
+            <div>
+              <Label htmlFor="delivery-month" className="mb-2 flex items-center gap-2">
+                Miesiąc dostawy
+              </Label>
+              <Select value={deliveryMonthFilter} onValueChange={setDeliveryMonthFilter}>
+                <SelectTrigger id="delivery-month">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Wszystkie miesiące</SelectItem>
+                  {availableDeliveryMonths.map((month) => (
+                    <SelectItem key={month.value} value={month.value}>
+                      {month.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
-          <div className="mt-4 flex justify-end">
+          <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-3 rounded-lg border border-gray-200 px-3 py-2">
+              <Switch
+                id="group-by-month"
+                checked={groupByMonth}
+                onCheckedChange={setGroupByMonth}
+              />
+              <Label htmlFor="group-by-month" className="cursor-pointer">
+                Zgrupuj
+              </Label>
+            </div>
             <Button variant="outline" onClick={exportToCSV} className="gap-2">
               <Download className="w-4 h-4" />
               Eksportuj CSV
@@ -319,27 +463,24 @@ export function PreordersListPage() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="cursor-pointer" onClick={() => handleSort('deliveryMonth')}>
+                  Miesiąc dostawy
+                  {getSortIcon('deliveryMonth')}
+                </TableHead>
                 <TableHead />
                 <TableHead className="cursor-pointer" onClick={() => handleSort('orderNumber')}>
                   Numer
                   {getSortIcon('orderNumber')}
                 </TableHead>
-                <TableHead className="cursor-pointer" onClick={() => handleSort('allocationOrder')}>
-                  Kolejność
-                  {getSortIcon('allocationOrder')}
-                </TableHead>
-                <TableHead className="cursor-pointer" onClick={() => handleSort('customerName')}>
-                  Klient
-                  {getSortIcon('customerName')}
-                </TableHead>
                 <TableHead className="cursor-pointer" onClick={() => handleSort('companyName')}>
                   Firma
                   {getSortIcon('companyName')}
                 </TableHead>
-                <TableHead className="cursor-pointer" onClick={() => handleSort('priority')}>
-                  Priorytet
-                  {getSortIcon('priority')}
+                <TableHead className="cursor-pointer" onClick={() => handleSort('customerPriority')}>
+                  Priorytet firmy
+                  {getSortIcon('customerPriority')}
                 </TableHead>
+                <TableHead>Priorytet preorderu</TableHead>
                 <TableHead className="text-right cursor-pointer" onClick={() => handleSort('items')}>
                   Pozycje
                   {getSortIcon('items')}
@@ -356,62 +497,242 @@ export function PreordersListPage() {
                   Data
                   {getSortIcon('createdAt')}
                 </TableHead>
-                <TableHead className="cursor-pointer" onClick={() => handleSort('deliveryMonth')}>
-                  Miesiąc dostawy
-                  {getSortIcon('deliveryMonth')}
-                </TableHead>
                 <TableHead></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredPreorders.map((preorder, index) => {
+              {(groupByMonth ? groupedPreorders.flatMap((group) => group.items) : filteredPreorders).length > 0 && groupByMonth && groupedPreorders.map((group) => {
+                const groupTotalQuantity = group.items.reduce(
+                  (sum, preorder) => sum + preorder.items.reduce((itemsSum, item) => itemsSum + item.quantity, 0),
+                  0
+                );
+
+                return (
+                  <React.Fragment key={`group-${group.monthIndex}`}>
+                    <TableRow className="bg-slate-100/80 hover:bg-slate-100/80">
+                      <TableCell colSpan={11} className="py-3">
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="flex items-center gap-3">
+                            <Badge variant="outline" className="bg-white">
+                              {group.monthLabel}
+                            </Badge>
+                            <span className="text-sm text-gray-600">
+                              {group.items.length} {group.items.length === 1 ? 'preorder' : group.items.length < 5 ? 'preordery' : 'preorderów'}
+                            </span>
+                          </div>
+                          <span className="text-sm font-medium text-gray-700">
+                            {groupTotalQuantity} szt.
+                          </span>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                    {group.items.map((preorder) => {
+                      const customer = customerById.get(preorder.customerId);
+                      const isDelinquent = isCustomerDelinquent(customer);
+                      const totalQuantity = preorder.items.reduce((sum, item) => sum + item.quantity, 0);
+                      const totalAllocated = preorder.items.reduce((sum, item) => sum + item.quantityAllocated, 0);
+                      const totalDelivered = preorder.items.reduce((sum, item) => sum + item.quantityDelivered, 0);
+                      const isDragged = draggedPreorderId === preorder.id;
+                      const isDropTarget = dropTargetPreorderId === preorder.id && draggedPreorderId !== preorder.id;
+                      const monthPriority = monthPriorityById.get(preorder.id) ?? 1;
+                      const monthOptionsCount = monthCountByIndex.get(preorder.deliveryMonth ?? 99) ?? 1;
+
+                      return (
+                        <React.Fragment key={preorder.id}>
+                          <TableRow
+                            data-preorder-row-id={preorder.id}
+                            onMouseEnter={() => updateDraggedDropTarget(preorder.id)}
+                            className={`hover:bg-gray-50 ${groupByMonth ? 'bg-slate-50/60' : ''} ${isDragged ? 'bg-blue-50' : ''} ${isDropTarget ? 'bg-amber-50 ring-1 ring-amber-200' : ''}`}
+                          >
+                            <TableCell className={groupByMonth ? 'pl-8' : undefined}>
+                              <div className={groupByMonth ? 'border-l-2 border-slate-200 pl-4' : undefined}>
+                                {getDeliveryMonth(preorder)}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <span
+                                data-drag-handle="true"
+                                className="inline-flex text-gray-500 cursor-grab active:cursor-grabbing"
+                                onMouseDown={(event) => handleMouseDragStart(event, preorder.id)}
+                                onDragStart={(event) => event.preventDefault()}
+                                title="Przeciągnij, aby zmienić kolejność"
+                              >
+                                <GripVertical className="w-4 h-4" />
+                              </span>
+                            </TableCell>
+                            <TableCell className="font-medium">{preorder.orderNumber}</TableCell>
+                            <TableCell>
+                              <div className="space-y-1">
+                                <div>{preorder.companyName}</div>
+                                {isDelinquent && <Badge variant="destructive">Zalega</Badge>}
+                              </div>
+                            </TableCell>
+                            <TableCell>{getPriorityBadge(preorder.customerPriority ?? preorder.priority)}</TableCell>
+                            <TableCell>
+                              <Select
+                                value={String(monthPriority)}
+                                onValueChange={(value) => handlePreorderPositionChange(preorder.id, value)}
+                                onOpenChange={(open) => {
+                                  if (open) {
+                                    dragCleanupRef.current?.();
+                                  }
+                                }}
+                              >
+                                <SelectTrigger className="w-20 h-7" onMouseDown={(event) => event.stopPropagation()}>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {Array.from({ length: monthOptionsCount }, (_, index) => String(index + 1)).map((option) => (
+                                    <SelectItem key={option} value={option}>
+                                      {option}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </TableCell>
+                            <TableCell className="text-right">{preorder.items.length}</TableCell>
+                            <TableCell className="text-right">
+                              <div className="text-sm">
+                                <div className="font-medium">{totalQuantity}</div>
+                                {totalAllocated > 0 && (
+                                  <div className="text-xs text-blue-600">alok: {totalAllocated}</div>
+                                )}
+                                {totalDelivered > 0 && (
+                                  <div className="text-xs text-green-600">dost: {totalDelivered}</div>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-wrap gap-2">
+                                {getStatusBadge(preorder.status)}
+                                {getDebtDecisionBadge(preorder)}
+                              </div>
+                            </TableCell>
+                            <TableCell>{new Date(preorder.createdAt).toLocaleDateString('pl-PL')}</TableCell>
+                            <TableCell>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setExpandedPreorder(
+                                  expandedPreorder === preorder.id ? null : preorder.id
+                                )}
+                              >
+                                {expandedPreorder === preorder.id ? 'Zwiń' : 'Rozwiń'}
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                          {expandedPreorder === preorder.id && (
+                            <TableRow>
+                              <TableCell colSpan={11} className="bg-gray-50">
+                                <div className="p-4">
+                                  {renderDebtSummary(preorder)}
+                                  <h4 className="font-semibold mb-3">Pozycje zamówienia:</h4>
+                                  <Table>
+                                    <TableHeader>
+                                      <TableRow>
+                                        <TableHead>SKU</TableHead>
+                                        <TableHead>Produkt</TableHead>
+                                        <TableHead>Wariant</TableHead>
+                                        <TableHead className="text-right">Zamówione</TableHead>
+                                        <TableHead className="text-right">Alokowane</TableHead>
+                                        <TableHead className="text-right">Dostarczone</TableHead>
+                                      </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                      {preorder.items.map(item => {
+                                        const { product, variant } = getProductDetails(item.productId, item.variantId);
+                                        if (!product || !variant) return null;
+
+                                        return (
+                                          <TableRow key={item.id}>
+                                            <TableCell className="font-mono text-sm">{variant.sku}</TableCell>
+                                            <TableCell>{product.name}</TableCell>
+                                            <TableCell>
+                                              <div className="text-sm">
+                                                {variant.color} / Rozm. {variant.size}
+                                              </div>
+                                            </TableCell>
+                                            <TableCell className="text-right font-medium">{item.quantity}</TableCell>
+                                            <TableCell className="text-right text-blue-600">
+                                              {item.quantityAllocated || '-'}
+                                            </TableCell>
+                                            <TableCell className="text-right text-green-600">
+                                              {item.quantityDelivered || '-'}
+                                            </TableCell>
+                                          </TableRow>
+                                        );
+                                      })}
+                                    </TableBody>
+                                  </Table>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </React.Fragment>
+                );
+              })}
+              {!groupByMonth && filteredPreorders.map((preorder) => {
+                const customer = customerById.get(preorder.customerId);
+                const isDelinquent = isCustomerDelinquent(customer);
                 const totalQuantity = preorder.items.reduce((sum, item) => sum + item.quantity, 0);
                 const totalAllocated = preorder.items.reduce((sum, item) => sum + item.quantityAllocated, 0);
                 const totalDelivered = preorder.items.reduce((sum, item) => sum + item.quantityDelivered, 0);
                 const isDragged = draggedPreorderId === preorder.id;
+                const isDropTarget = dropTargetPreorderId === preorder.id && draggedPreorderId !== preorder.id;
+                const monthPriority = monthPriorityById.get(preorder.id) ?? 1;
+                const monthOptionsCount = monthCountByIndex.get(preorder.deliveryMonth ?? 99) ?? 1;
 
                 return (
                   <React.Fragment key={preorder.id}>
                     <TableRow
-                      className={`hover:bg-gray-50 ${isDragged ? 'bg-blue-50' : ''}`}
-                      draggable
-                      onDragStart={(event) => handleDragStart(event, preorder.id)}
-                      onDragOver={handleDragOver}
-                      onDrop={(event) => handleDrop(event, preorder.id)}
-                      onDragEnd={handleDragEnd}
+                      data-preorder-row-id={preorder.id}
+                      onMouseEnter={() => updateDraggedDropTarget(preorder.id)}
+                      className={`hover:bg-gray-50 ${isDragged ? 'bg-blue-50' : ''} ${isDropTarget ? 'bg-amber-50 ring-1 ring-amber-200' : ''}`}
                     >
+                      <TableCell>{getDeliveryMonth(preorder)}</TableCell>
                       <TableCell>
                         <span
                           data-drag-handle="true"
-                          className="inline-flex text-gray-500 cursor-grab"
+                          className="inline-flex text-gray-500 cursor-grab active:cursor-grabbing"
+                          onMouseDown={(event) => handleMouseDragStart(event, preorder.id)}
+                          onDragStart={(event) => event.preventDefault()}
+                          title="Przeciągnij, aby zmienić kolejność"
                         >
                           <GripVertical className="w-4 h-4" />
                         </span>
                       </TableCell>
                       <TableCell className="font-medium">{preorder.orderNumber}</TableCell>
-                      <TableCell className="text-xs text-gray-600">{preorder.allocationOrder ?? '-'}</TableCell>
-                      <TableCell>{preorder.customerName}</TableCell>
-                      <TableCell>{preorder.companyName}</TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-2">
-                          {getPriorityBadge(preorder.priority)}
-                          <Select
-                            value={String(preorder.priority)}
-                                onValueChange={(value) => handlePreorderPriorityChange(preorder.id, value)}
-                                onPointerDown={(event) => event.stopPropagation()}
-                              >
-                                <SelectTrigger className="w-20 h-7">
-                                  <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="1">1</SelectItem>
-                              <SelectItem value="2">2</SelectItem>
-                              <SelectItem value="3">3</SelectItem>
-                              <SelectItem value="4">4</SelectItem>
-                              <SelectItem value="5">5</SelectItem>
-                            </SelectContent>
-                          </Select>
+                        <div className="space-y-1">
+                          <div>{preorder.companyName}</div>
+                          {isDelinquent && <Badge variant="destructive">Zalega</Badge>}
                         </div>
+                      </TableCell>
+                      <TableCell>{getPriorityBadge(preorder.customerPriority ?? preorder.priority)}</TableCell>
+                      <TableCell>
+                        <Select
+                          value={String(monthPriority)}
+                          onValueChange={(value) => handlePreorderPositionChange(preorder.id, value)}
+                          onOpenChange={(open) => {
+                            if (open) {
+                              dragCleanupRef.current?.();
+                            }
+                          }}
+                        >
+                          <SelectTrigger className="w-20 h-7" onMouseDown={(event) => event.stopPropagation()}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {Array.from({ length: monthOptionsCount }, (_, index) => String(index + 1)).map((option) => (
+                              <SelectItem key={option} value={option}>
+                                {option}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </TableCell>
                       <TableCell className="text-right">{preorder.items.length}</TableCell>
                       <TableCell className="text-right">
@@ -425,31 +746,13 @@ export function PreordersListPage() {
                           )}
                         </div>
                       </TableCell>
-                      <TableCell>{getStatusBadge(preorder.status)}</TableCell>
-                      <TableCell>{new Date(preorder.createdAt).toLocaleDateString('pl-PL')}</TableCell>
-                      <TableCell>{getDeliveryMonth(preorder)}</TableCell>
                       <TableCell>
-                        <div className="flex gap-1 justify-end">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 w-7 p-0"
-                            onClick={() => moveOrderUp(preorder.id, index, filteredPreorders)}
-                            disabled={index === 0}
-                          >
-                            <ArrowUp className="w-3 h-3" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 w-7 p-0"
-                            onClick={() => moveOrderDown(preorder.id, index, filteredPreorders)}
-                            disabled={index === filteredPreorders.length - 1}
-                          >
-                            <ArrowDown className="w-3 h-3" />
-                          </Button>
+                        <div className="flex flex-wrap gap-2">
+                          {getStatusBadge(preorder.status)}
+                          {getDebtDecisionBadge(preorder)}
                         </div>
                       </TableCell>
+                      <TableCell>{new Date(preorder.createdAt).toLocaleDateString('pl-PL')}</TableCell>
                       <TableCell>
                         <Button
                           variant="ghost"
@@ -464,8 +767,9 @@ export function PreordersListPage() {
                     </TableRow>
                     {expandedPreorder === preorder.id && (
                       <TableRow>
-                        <TableCell colSpan={12} className="bg-gray-50">
+                        <TableCell colSpan={11} className="bg-gray-50">
                           <div className="p-4">
+                            {renderDebtSummary(preorder)}
                             <h4 className="font-semibold mb-3">Pozycje zamówienia:</h4>
                             <Table>
                               <TableHeader>

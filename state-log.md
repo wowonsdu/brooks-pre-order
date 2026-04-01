@@ -31,3 +31,36 @@
   - uporządkowano układ strony: szybki podział jako pierwszy filtr, potem miesiąc, priorytet, klient,
   - nazwano ekran z historią jako `Widok zamówień`,
   - zaktualizowano kontrakty i kontekst o `customerPriority`, `allocationOrder`, `seasonWindow`, `deliveryMonth` oraz reguły alokacji.
+- 2026-03-31: domknięto bugfixy runtime/UI bez zmiany kontraktów:
+  - `OrderConfigurator` przestał wpadać w `Maximum update depth exceeded` po ustabilizowaniu selektora klientów w `demo-store`,
+  - drag & drop reorder preorderów działa z uchwytu w pierwszej kolumnie tabeli zamiast z całego wiersza.
+- 2026-03-31: dopracowano układ listy preorderów pod szybkie prototypowanie UI:
+  - `deliveryMonth` jest pierwszą kolumną tabeli,
+  - domyślne sortowanie preorderów ustawiono na `deliveryMonth` z dogrywką po `allocationOrder`,
+  - sortowanie miesiąca działa po indeksie miesiąca, nie po alfabetycznej nazwie.
+- 2026-03-31: rozszerzono widok preorderów o sterowanie miesiącem dostawy:
+  - dodano dropdown do filtrowania tylko wybranego `deliveryMonth`,
+  - dodano przełącznik `Zgrupuj`, który renderuje sekcje preorderów per miesiąc dostawy z prostym podsumowaniem.
+- 2026-03-31: odchudzono tabelę preorderów pod szerokość roboczą:
+  - usunięto redundantną kolumnę klienta i martwe strzałki kolejności,
+  - rekordy wewnątrz grup miesięcznych są wizualnie odsunięte od lewej,
+  - mechanizm przenoszenia preorderu przepięto z natywnego HTML5 drag/drop na pointer-based drag z uchwytu.
+- 2026-03-31: doprecyzowano model priorytetu preorderu:
+  - sortowanie listy preorderów działa tylko po jednej kolumnie naraz,
+  - `Kolejność` w tabeli pokazuje pozycję preorderu wewnątrz jego miesiąca dostawy,
+  - reorder z uchwytu działa wyłącznie w obrębie tego samego `deliveryMonth`,
+  - alokacja dostawy czyta teraz `allocationOrder` jako realny priorytet realizacji preorderu, z `priority` klienta tylko jako fallback.
+- 2026-03-31: uproszczono widok tabeli preorderów:
+  - usunięto renderowaną kolumnę `Kolejność`,
+  - kolejność preorderu została zostawiona wyłącznie jako wewnętrzna logika realizacji/alokacji.
+- 2026-03-31: naprawiono niespójność reorderu preorderów:
+  - drop z końca grupy na górę nie jest już cofany przez stare `allocationOrder`,
+  - `allocationOrder` jest nadawany per miesiąc po aktualnej kolejności w store,
+  - dropdown w kolumnie `Priorytet` steruje teraz tą samą kolejnością realizacji co drag handle.
+- 2026-03-31: przywrócono w tabeli preorderów osobną kolumnę z domyślnym priorytetem firmy (`customerPriority`) bez wycofywania nowego mechanizmu reorderu preorderów.
+- 2026-04-01: dodano profil zaległości klienta i flow dopuszczenia preorderów do konsolidacji:
+  - `User` ma teraz `debtAmountPln`, `debtSince`, `allowOrders`,
+  - `Preorder` ma `debtDecision`, `debtDecisionAt`, `debtDecisionBy`,
+  - dashboard renderuje panel review dla preorderów klientów zalegających z decyzją per preorder i per firma,
+  - lista preorderów pokazuje badge `Zalega` i szczegóły zaległości w expandzie,
+  - konsolidacja, konfigurator zamówień i alokacja pomijają preordery niedopuszczone do procesu.

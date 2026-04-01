@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { mockProducts } from '../../lib/mock-data';
-import { addConsolidatedOrders, useConsolidatedOrders, usePreorders, updateConsolidatedOrders } from '../../lib/demo-store';
+import { addConsolidatedOrders, isPreorderEligibleForConsolidation, updateConsolidatedOrders, useConsolidatedOrders, useCustomers, usePreorders } from '../../lib/demo-store';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -32,6 +32,7 @@ interface SplitConfig {
 export function ConsolidationPage() {
   const navigate = useNavigate();
   const preorders = usePreorders();
+  const customers = useCustomers();
   const consolidatedOrders = useConsolidatedOrders();
   const [selectedBrand, setSelectedBrand] = useState<string>('Brooks');
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
@@ -45,6 +46,30 @@ export function ConsolidationPage() {
   const [expandedPriorities, setExpandedPriorities] = useState<Set<number>>(new Set());
   const [expandedMonths, setExpandedMonths] = useState<Set<string>>(new Set());
   const [sortConfig, setSortConfig] = useState<{ column: string; direction: 'asc' | 'desc' } | null>(null);
+  const customerById = useMemo(
+    () => new Map(customers.map((customer) => [customer.id, customer])),
+    [customers],
+  );
+  const eligiblePendingPreorders = useMemo(
+    () => preorders.filter((preorder) => preorder.status === 'pending' && isPreorderEligibleForConsolidation(preorder, customerById.get(preorder.customerId))),
+    [customerById, preorders],
+  );
+  const blockedBrandSummary = useMemo(() => {
+    const blocked = preorders.filter((preorder) => {
+      if (preorder.status !== 'pending') return false;
+      if (isPreorderEligibleForConsolidation(preorder, customerById.get(preorder.customerId))) return false;
+      return preorder.items.some((item) => mockProducts.find((product) => product.id === item.productId)?.brand === selectedBrand);
+    });
+
+    return {
+      preorderCount: blocked.length,
+      customerCount: new Set(blocked.map((preorder) => preorder.customerId)).size,
+      totalQuantity: blocked.reduce((sum, preorder) => sum + preorder.items.reduce((itemSum, item) => {
+        const product = mockProducts.find((entry) => entry.id === item.productId);
+        return product?.brand === selectedBrand ? itemSum + item.quantity : itemSum;
+      }, 0), 0),
+    };
+  }, [customerById, preorders, selectedBrand]);
 
   // Get all brands from products
   const brands = Array.from(new Set(mockProducts.map(p => p.brand)));
@@ -73,8 +98,7 @@ export function ConsolidationPage() {
   const consolidatePreorders = (): ConsolidatedItemWithDetails[] => {
     const consolidated = new Map<string, ConsolidatedItemWithDetails>();
 
-    preorders
-      .filter(po => po.status === 'pending')
+    eligiblePendingPreorders
       .forEach(preorder => {
         preorder.items.forEach(item => {
           const product = mockProducts.find(p => p.id === item.productId);
@@ -209,7 +233,7 @@ export function ConsolidationPage() {
       byMonth: Record<string, number>;
     }>();
 
-    preorders.filter(po => po.status === 'pending').forEach(preorder => {
+    eligiblePendingPreorders.forEach(preorder => {
       preorder.items.forEach(item => {
         const product = mockProducts.find(p => p.id === item.productId);
         if (product?.brand !== selectedBrand) return;
@@ -247,7 +271,7 @@ export function ConsolidationPage() {
       variantCount: Array.from(g.products.values()).reduce((s, p) => s + p.variants.length, 0),
       productsList: Array.from(g.products.values()).sort((a, b) => a.productName.localeCompare(b.productName)),
     }));
-  }, [consolidatedItems, selectedBrand]);
+  }, [eligiblePendingPreorders, consolidatedItems, selectedBrand]);
 
   // Group by month
   const groupedByMonth = useMemo(() => {
@@ -266,7 +290,7 @@ export function ConsolidationPage() {
       byPriority: Record<number, number>;
     }>();
 
-    preorders.filter(po => po.status === 'pending').forEach(preorder => {
+    eligiblePendingPreorders.forEach(preorder => {
       preorder.items.forEach(item => {
         const product = mockProducts.find(p => p.id === item.productId);
         if (product?.brand !== selectedBrand) return;
@@ -304,7 +328,7 @@ export function ConsolidationPage() {
       variantCount: Array.from(g.products.values()).reduce((s, p) => s + p.variants.length, 0),
       productsList: Array.from(g.products.values()).sort((a, b) => a.productName.localeCompare(b.productName)),
     }));
-  }, [consolidatedItems, selectedBrand]);
+  }, [eligiblePendingPreorders, consolidatedItems, selectedBrand]);
 
   const togglePriorityExpanded = (p: number) => {
     const next = new Set(expandedPriorities);
@@ -705,6 +729,11 @@ export function ConsolidationPage() {
               </div>
             </CardHeader>
             <CardContent>
+              {blockedBrandSummary.preorderCount > 0 && (
+                <div className="mb-4 rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-900">
+                  Wstrzymane przez zaległości: {blockedBrandSummary.preorderCount} preorderów od {blockedBrandSummary.customerCount} klientów, łącznie {blockedBrandSummary.totalQuantity} szt. Nie są uwzględnione w konsolidacji. Przejdź do dashboardu, aby je dopuścić lub wstrzymać.
+                </div>
+              )}
               {consolidatedItems.length === 0 ? (
                 <div className="text-center py-8 text-gray-500">
                   <FileText className="w-12 h-12 mx-auto mb-2 text-gray-400" />

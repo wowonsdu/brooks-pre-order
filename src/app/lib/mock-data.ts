@@ -4,6 +4,7 @@
 export type UserRole = 'admin' | 'b2b_customer';
 
 export type PreorderSeason = 'spring' | 'winter';
+export type DebtDecision = 'not_required' | 'pending_review' | 'approved' | 'rejected';
 
 export interface User {
   id: string;
@@ -12,6 +13,9 @@ export interface User {
   role: UserRole;
   companyName?: string;
   priority?: number; // 1-5, where 1 is highest priority
+  debtAmountPln?: number;
+  debtSince?: string;
+  allowOrders?: boolean;
 }
 
 export interface ProductVariant {
@@ -65,6 +69,9 @@ export interface Preorder {
   allocationOrder?: number;
   seasonWindow?: PreorderSeason;
   deliveryMonth?: number;
+  debtDecision: DebtDecision;
+  debtDecisionAt?: string;
+  debtDecisionBy?: string;
 }
 
 export interface ConsolidatedOrder {

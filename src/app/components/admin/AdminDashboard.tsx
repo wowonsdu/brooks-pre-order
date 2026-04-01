@@ -1,7 +1,9 @@
-import { useConsolidatedOrders, useDeliveries, usePreorders } from '../../lib/demo-store';
+import { isCustomerDelinquent, setCompanyDebtDecision, setPreorderDebtDecision, useConsolidatedOrders, useCustomers, useDeliveries, usePreorders } from '../../lib/demo-store';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { useNavigate } from 'react-router';
+import { useMemo } from 'react';
+import { useAuth } from '../../lib/auth-context';
 import { 
   Package, 
   ClipboardList, 
@@ -15,9 +17,15 @@ import {
 
 export function AdminDashboard() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const preorders = usePreorders();
+  const customers = useCustomers();
   const consolidatedOrders = useConsolidatedOrders();
   const deliveries = useDeliveries();
+  const customerById = useMemo(
+    () => new Map(customers.map((customer) => [customer.id, customer])),
+    [customers],
+  );
 
   // Calculate stats
   const totalPreorders = preorders.length;
@@ -30,6 +38,59 @@ export function AdminDashboard() {
   const activeDeliveries = deliveries.filter(d => d.status === 'announced' || d.status === 'in_allocation').length;
   const totalConsolidatedOrders = consolidatedOrders.length;
   const sentOrders = consolidatedOrders.filter(co => co.status === 'sent' || co.status === 'confirmed').length;
+
+  const delinquentReviewGroups = useMemo(() => {
+    const grouped = new Map<string, {
+      customerId: string;
+      companyName: string;
+      debtAmountPln: number;
+      debtSince?: string;
+      allowOrders: boolean;
+      totalQuantity: number;
+      preorderCount: number;
+      items: Array<typeof preorders[number]>;
+    }>();
+
+    preorders
+      .filter((preorder) => preorder.status === 'pending')
+      .forEach((preorder) => {
+        const customer = customerById.get(preorder.customerId);
+        if (!isCustomerDelinquent(customer)) return;
+
+        const existing = grouped.get(preorder.customerId);
+        const totalQuantity = preorder.items.reduce((sum, item) => sum + item.quantity, 0);
+
+        if (existing) {
+          existing.items.push(preorder);
+          existing.totalQuantity += totalQuantity;
+          existing.preorderCount += 1;
+          return;
+        }
+
+        grouped.set(preorder.customerId, {
+          customerId: preorder.customerId,
+          companyName: preorder.companyName,
+          debtAmountPln: customer?.debtAmountPln ?? 0,
+          debtSince: customer?.debtSince,
+          allowOrders: customer?.allowOrders !== false,
+          totalQuantity,
+          preorderCount: 1,
+          items: [preorder],
+        });
+      });
+
+    return Array.from(grouped.values())
+      .map((group) => ({
+        ...group,
+        items: group.items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+      }))
+      .sort((a, b) => b.debtAmountPln - a.debtAmountPln);
+  }, [customerById, preorders]);
+
+  const pendingDebtReviews = delinquentReviewGroups.reduce(
+    (sum, group) => sum + group.items.filter((item) => item.debtDecision === 'pending_review').length,
+    0,
+  );
 
   const stats = [
     {
@@ -77,6 +138,93 @@ export function AdminDashboard() {
         <h1 className="text-3xl font-bold text-gray-900">Dashboard Administratora</h1>
         <p className="text-gray-600 mt-1">Przegląd systemu preorderów B2B</p>
       </div>
+
+      {pendingDebtReviews > 0 && (
+        <Card className="mb-6 border-red-200 bg-red-50">
+          <CardHeader>
+            <CardTitle className="text-red-900">
+              Złożone zapotrzebowania zawierają preordery klientów zalegających
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-red-800">
+              Najpierw zdecyduj, czy dopuścić ich towar do zamówienia. Dopóki preorder ma status review, nie wejdzie do konsolidacji.
+            </p>
+            {delinquentReviewGroups.map((group) => (
+              <div key={group.customerId} className="rounded-lg border border-red-200 bg-white p-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="space-y-1">
+                    <div className="font-semibold text-gray-900">{group.companyName}</div>
+                    <div className="text-sm text-gray-600">
+                      Zalega: {group.debtAmountPln.toLocaleString('pl-PL')} PLN
+                      {group.debtSince ? `, od ${new Date(group.debtSince).toLocaleDateString('pl-PL')}` : ''}
+                    </div>
+                    <div className="text-sm text-gray-600">
+                      Aktywne preordery: {group.preorderCount}, łącznie {group.totalQuantity} szt.
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      Profil klienta: {group.allowOrders ? 'rekomenduj dopuszczenie' : 'rekomenduj wstrzymanie'}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant={group.allowOrders ? 'default' : 'outline'}
+                      onClick={() => setCompanyDebtDecision(group.customerId, 'approved', user?.name ?? 'Administrator')}
+                    >
+                      Uwzględnij wszystkie
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={group.allowOrders ? 'outline' : 'destructive'}
+                      onClick={() => setCompanyDebtDecision(group.customerId, 'rejected', user?.name ?? 'Administrator')}
+                    >
+                      Wstrzymaj wszystkie
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="mt-4 space-y-2">
+                  {group.items.map((preorder) => {
+                    const totalQuantity = preorder.items.reduce((sum, item) => sum + item.quantity, 0);
+                    return (
+                      <div key={preorder.id} className="flex flex-col gap-3 rounded-md border border-gray-200 px-3 py-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div>
+                          <div className="font-medium text-sm text-gray-900">{preorder.orderNumber}</div>
+                          <div className="text-xs text-gray-600">
+                            {new Date(preorder.createdAt).toLocaleDateString('pl-PL')} • {totalQuantity} szt.
+                          </div>
+                          <div className="mt-1 text-xs">
+                            {preorder.debtDecision === 'pending_review' && <span className="font-medium text-orange-700">Oczekuje decyzji</span>}
+                            {preorder.debtDecision === 'approved' && <span className="font-medium text-green-700">Uwzględniony w zamówieniu</span>}
+                            {preorder.debtDecision === 'rejected' && <span className="font-medium text-red-700">Wstrzymany</span>}
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            variant={preorder.debtDecision === 'approved' ? 'default' : 'outline'}
+                            onClick={() => setPreorderDebtDecision(preorder.id, 'approved', user?.name ?? 'Administrator')}
+                          >
+                            Uwzględnij
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={preorder.debtDecision === 'rejected' ? 'destructive' : 'outline'}
+                            onClick={() => setPreorderDebtDecision(preorder.id, 'rejected', user?.name ?? 'Administrator')}
+                          >
+                            Wstrzymaj
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">

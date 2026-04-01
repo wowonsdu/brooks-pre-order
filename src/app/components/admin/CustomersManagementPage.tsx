@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useCustomers, setCustomerPriority } from '../../lib/demo-store';
+import { getDebtDurationLabel, isCustomerDelinquent, setCustomerDebtProfile, setCustomerPriority, useCustomers } from '../../lib/demo-store';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -24,6 +24,25 @@ export function CustomersManagementPage() {
 
   const updatePriority = (userId: string, newPriority: number) => {
     setCustomerPriority(userId, newPriority);
+  };
+
+  const updateDebtAmount = (userId: string, value: string) => {
+    const numericValue = value.trim() === '' ? undefined : Number.parseInt(value, 10);
+    setCustomerDebtProfile(userId, {
+      debtAmountPln: Number.isFinite(numericValue) ? numericValue : undefined,
+    });
+  };
+
+  const updateDebtSince = (userId: string, value: string) => {
+    setCustomerDebtProfile(userId, {
+      debtSince: value || undefined,
+    });
+  };
+
+  const updateAllowOrders = (userId: string, value: string) => {
+    setCustomerDebtProfile(userId, {
+      allowOrders: value === 'yes',
+    });
   };
 
   const movePriority = (userId: string, direction: 'up' | 'down') => {
@@ -143,6 +162,9 @@ export function CustomersManagementPage() {
                 <TableHead>Nazwa</TableHead>
                 <TableHead>Firma</TableHead>
                 <TableHead>Email</TableHead>
+                <TableHead>Zaległość</TableHead>
+                <TableHead>Od kiedy</TableHead>
+                <TableHead>Pozwól na zamówienia</TableHead>
                 <TableHead>Zmień priorytet</TableHead>
               </TableRow>
             </TableHeader>
@@ -163,6 +185,59 @@ export function CustomersManagementPage() {
                   <TableCell className="font-medium">{customer.name}</TableCell>
                   <TableCell>{customer.companyName || '-'}</TableCell>
                   <TableCell className="text-sm text-gray-600">{customer.email}</TableCell>
+                  <TableCell>
+                    <div className="space-y-2 min-w-40">
+                      {isCustomerDelinquent(customer) ? (
+                        <>
+                          <Badge variant="destructive">Zalega</Badge>
+                          <div className="text-xs text-gray-600">
+                            {(customer.debtAmountPln ?? 0).toLocaleString('pl-PL')} PLN
+                          </div>
+                        </>
+                      ) : (
+                        <Badge variant="outline">Brak zaległości</Badge>
+                      )}
+                      <Input
+                        type="number"
+                        min="0"
+                        step="100"
+                        value={customer.debtAmountPln ?? ''}
+                        onChange={(e) => updateDebtAmount(customer.id, e.target.value)}
+                        placeholder="Kwota PLN"
+                      />
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="space-y-2 min-w-40">
+                      <Input
+                        type="date"
+                        value={customer.debtSince ?? ''}
+                        onChange={(e) => updateDebtSince(customer.id, e.target.value)}
+                      />
+                      <p className="text-xs text-gray-600">
+                        {customer.debtSince ? getDebtDurationLabel(customer.debtSince) : 'Brak daty'}
+                      </p>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="space-y-2 min-w-36">
+                      <Select
+                        value={customer.allowOrders === false ? 'no' : 'yes'}
+                        onValueChange={(value) => updateAllowOrders(customer.id, value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="yes">Tak</SelectItem>
+                          <SelectItem value="no">Nie</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-gray-600">
+                        {customer.allowOrders === false ? 'Domyślnie wstrzymuj review' : 'Domyślnie rekomenduj dopuszczenie'}
+                      </p>
+                    </div>
+                  </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2">
                       <Select

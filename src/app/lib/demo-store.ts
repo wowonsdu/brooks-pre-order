@@ -1,11 +1,17 @@
 import { useSyncExternalStore } from 'react';
 import { mockProducts, mockUsers, mockPreorders, mockConsolidatedOrders, mockDeliveries } from './mock-data';
-import type { ConsolidatedOrder, Delivery, Preorder, PreorderSeason, PreorderItem, User } from './mock-data';
+import type { ConsolidatedOrder, DebtDecision, Delivery, Preorder, PreorderSeason, PreorderItem, User } from './mock-data';
 
 const DEMO_STATE_STORAGE_KEY = 'brooks-preorder-demo-state-v1';
 
 const MONTH_IN_SEASON_SPRING = [10, 11, 0, 1, 2];
 const MONTH_IN_SEASON_WINTER = [4, 5, 6, 7, 8];
+const DEFAULT_ALLOW_ORDERS = true;
+const DEMO_DEBT_PROFILES: Record<string, Pick<User, 'debtAmountPln' | 'debtSince' | 'allowOrders'>> = {
+  customer_2: { debtAmountPln: 18450, debtSince: '2026-01-12', allowOrders: false },
+  customer_5: { debtAmountPln: 9200, debtSince: '2026-02-03', allowOrders: true },
+  customer_8: { debtAmountPln: 27600, debtSince: '2025-12-18', allowOrders: false },
+};
 
 type DemoState = {
   preorders: Preorder[];
@@ -33,18 +39,116 @@ const parseStoredState = (): DemoState | null => {
 
 const clone = <T,>(value: T): T => structuredClone(value);
 
+const applyDefaultDebtProfile = (user: User): User => {
+  if (user.role !== 'b2b_customer') return user;
+  const defaults = DEMO_DEBT_PROFILES[user.id];
+  return {
+    ...user,
+    allowOrders: user.allowOrders ?? defaults?.allowOrders ?? DEFAULT_ALLOW_ORDERS,
+    debtAmountPln: user.debtAmountPln ?? defaults?.debtAmountPln,
+    debtSince: user.debtSince ?? defaults?.debtSince,
+  };
+};
+
+export const isCustomerDelinquent = (customer?: Pick<User, 'role' | 'debtAmountPln' | 'debtSince'> | null) => {
+  if (!customer || customer.role !== 'b2b_customer') return false;
+  return (customer.debtAmountPln ?? 0) > 0 && Boolean(customer.debtSince);
+};
+
+export const getDebtDurationInDays = (debtSince?: string) => {
+  if (!debtSince) return 0;
+  const parsed = new Date(debtSince);
+  if (Number.isNaN(parsed.getTime())) return 0;
+  const millisecondsPerDay = 1000 * 60 * 60 * 24;
+  return Math.max(0, Math.floor((Date.now() - parsed.getTime()) / millisecondsPerDay));
+};
+
+export const getDebtDurationLabel = (debtSince?: string) => {
+  const days = getDebtDurationInDays(debtSince);
+  if (days <= 0) return '0 dni';
+  if (days === 1) return '1 dzień';
+  return `${days} dni`;
+};
+
+export const getDebtDecisionLabel = (decision: DebtDecision) => {
+  switch (decision) {
+    case 'approved':
+      return 'Dopuszczony';
+    case 'rejected':
+      return 'Wstrzymany';
+    case 'pending_review':
+      return 'Oczekuje decyzji';
+    case 'not_required':
+    default:
+      return 'Bez ograniczeń';
+  }
+};
+
+const normalizeDebtDecision = (preorder: Preorder, customer?: User): Preorder => {
+  if (!isCustomerDelinquent(customer)) {
+    return {
+      ...preorder,
+      debtDecision: 'not_required',
+      debtDecisionAt: undefined,
+      debtDecisionBy: undefined,
+    };
+  }
+
+  const nextDecision: DebtDecision = preorder.debtDecision === 'approved' || preorder.debtDecision === 'rejected'
+    ? preorder.debtDecision
+    : 'pending_review';
+
+  return {
+    ...preorder,
+    debtDecision: nextDecision,
+  };
+};
+
+const syncDebtStateForPreorders = (preorders: Preorder[], users: User[]) => {
+  const usersById = new Map(users.map((user) => [user.id, user]));
+  return preorders.map((preorder) => normalizeDebtDecision(preorder, usersById.get(preorder.customerId)));
+};
+
+export const isPreorderEligibleForConsolidation = (preorder: Preorder, customer?: User | null) => {
+  if (!isCustomerDelinquent(customer)) {
+    return true;
+  }
+  return preorder.debtDecision === 'approved';
+};
+
+const comparePreordersByMonthAndOrder = (a: Preorder, b: Preorder) => {
+  const monthDiff = (a.deliveryMonth ?? 99) - (b.deliveryMonth ?? 99);
+  if (monthDiff !== 0) return monthDiff;
+
+  const orderDiff = (a.allocationOrder ?? 0) - (b.allocationOrder ?? 0);
+  if (orderDiff !== 0) return orderDiff;
+
+  return a.orderNumber.localeCompare(b.orderNumber);
+};
+
+const comparePreordersByMonthAndPriority = (a: Preorder, b: Preorder) => {
+  const monthDiff = (a.deliveryMonth ?? 99) - (b.deliveryMonth ?? 99);
+  if (monthDiff !== 0) return monthDiff;
+
+  const priorityDiff = (a.priority ?? 99) - (b.priority ?? 99);
+  if (priorityDiff !== 0) return priorityDiff;
+
+  return a.orderNumber.localeCompare(b.orderNumber);
+};
+
 const assignAllocationOrder = (preorders: Preorder[]) => {
-  preorders.forEach((preorder, index) => {
-    preorder.allocationOrder = preorder.allocationOrder ?? index + 1;
-  });
-  preorders.sort((a, b) => (a.allocationOrder ?? 0) - (b.allocationOrder ?? 0));
-  preorders.forEach((preorder, index) => {
-    preorder.allocationOrder = index + 1;
+  const monthCounters = new Map<number, number>();
+
+  preorders.forEach((preorder) => {
+    const monthIndex = preorder.deliveryMonth ?? 99;
+    const nextPosition = (monthCounters.get(monthIndex) ?? 0) + 1;
+    monthCounters.set(monthIndex, nextPosition);
+    preorder.allocationOrder = nextPosition;
   });
 };
 
-const normalizePreorders = (preorders: Preorder[]) =>
-  preorders.map((preorder, index) => {
+const normalizePreorders = (preorders: Preorder[], users: User[]) =>
+  syncDebtStateForPreorders(preorders, users).map((preorder, index) => {
     const customerPriority = preorder.customerPriority ?? preorder.priority ?? 5;
     return {
       ...preorder,
@@ -52,6 +156,7 @@ const normalizePreorders = (preorders: Preorder[]) =>
       customerPriority,
       seasonWindow: preorder.seasonWindow ?? 'spring',
       deliveryMonth: preorder.deliveryMonth ?? ((index + 1) % 12),
+      debtDecision: preorder.debtDecision ?? 'not_required',
     } satisfies Preorder;
   });
 
@@ -126,9 +231,10 @@ const nextPreorderNumber = (preorders: Preorder[]) => {
 const normalizeUsers = (users: User[]) =>
   users.map(user => {
     if (user.role !== 'b2b_customer') return user;
+    const withDebtProfile = applyDefaultDebtProfile(user);
     return {
-      ...user,
-      priority: user.priority ?? 5,
+      ...withDebtProfile,
+      priority: withDebtProfile.priority ?? 5,
     };
   });
 
@@ -143,14 +249,17 @@ const hydratePreorders = (): DemoState => {
   const persisted = parseStoredState();
 
   if (persisted) {
-    const mergedPreorders = normalizePreorders(
-      persisted.preorders.length > 0
-        ? persisted.preorders
-        : mockPreorders
-    );
     const mergedUsers = normalizeUsers(
       persisted.users.length > 0 ? persisted.users : mockUsers
     );
+    const mergedPreorders = normalizePreorders(
+      persisted.preorders.length > 0
+        ? persisted.preorders
+        : mockPreorders,
+      mergedUsers,
+    );
+    mergedPreorders.sort(comparePreordersByMonthAndOrder);
+    assignAllocationOrder(mergedPreorders);
     const mergedConsolidated = persisted.consolidatedOrders ?? mockConsolidatedOrders;
     const mergedDeliveries = persisted.deliveries ?? mockDeliveries;
 
@@ -162,12 +271,14 @@ const hydratePreorders = (): DemoState => {
     };
   }
 
-  const seededPreorders = normalizePreorders(clone(mockPreorders));
+  const seededUsers = normalizeUsers(clone(mockUsers));
+  const seededPreorders = normalizePreorders(clone(mockPreorders), seededUsers);
+  seededPreorders.sort(comparePreordersByMonthAndPriority);
   assignAllocationOrder(seededPreorders);
 
   return {
     preorders: seededPreorders,
-    users: normalizeUsers(clone(mockUsers)),
+    users: seededUsers,
     consolidatedOrders: clone(mockConsolidatedOrders),
     deliveries: clone(mockDeliveries),
   };
@@ -233,7 +344,9 @@ const useDemoState = <T,>(selector: (snapshot: DemoState) => T): T =>
   );
 
 export const usePreorders = () => useDemoState((snapshot) => snapshot.preorders);
-export const useCustomers = () => useDemoState((snapshot) => snapshot.users.filter((user) => user.role === 'b2b_customer'));
+// Return the stable user list here; callers can derive filtered views without
+// forcing a fresh array from the external store on every snapshot read.
+export const useCustomers = () => useDemoState((snapshot) => snapshot.users);
 export const useCustomersAll = () => useDemoState((snapshot) => snapshot.users);
 export const useConsolidatedOrders = () => useDemoState((snapshot) => snapshot.consolidatedOrders);
 export const useDeliveries = () => useDemoState((snapshot) => snapshot.deliveries);
@@ -242,14 +355,48 @@ export const reorderPreorders = (sourcePreorderId: string, targetPreorderId: str
   if (sourcePreorderId === targetPreorderId) return;
 
   updateState((draft) => {
+    draft.preorders.sort(comparePreordersByMonthAndOrder);
+
     const fromIndex = draft.preorders.findIndex((item) => item.id === sourcePreorderId);
     const toIndex = draft.preorders.findIndex((item) => item.id === targetPreorderId);
     if (fromIndex === -1 || toIndex === -1) return;
 
+    const source = draft.preorders[fromIndex];
+    const target = draft.preorders[toIndex];
+    if ((source.deliveryMonth ?? 99) !== (target.deliveryMonth ?? 99)) {
+      return;
+    }
+
     const [moved] = draft.preorders.splice(fromIndex, 1);
-    const nextIndex = fromIndex < toIndex ? toIndex - 1 : toIndex;
-    draft.preorders.splice(nextIndex, 0, moved);
+    draft.preorders.splice(toIndex, 0, moved);
     assignAllocationOrder(draft.preorders);
+    draft.preorders.sort(comparePreordersByMonthAndOrder);
+  });
+};
+
+export const setPreorderAllocationPosition = (preorderId: string, targetPosition: number) => {
+  updateState((draft) => {
+    draft.preorders.sort(comparePreordersByMonthAndOrder);
+
+    const source = draft.preorders.find((item) => item.id === preorderId);
+    if (!source) return;
+
+    const monthIndex = source.deliveryMonth ?? 99;
+    const monthPreorders = draft.preorders.filter((item) => (item.deliveryMonth ?? 99) === monthIndex);
+    if (monthPreorders.length === 0) return;
+
+    const normalizedTarget = Math.min(monthPreorders.length, Math.max(1, targetPosition));
+    const target = monthPreorders[normalizedTarget - 1];
+    if (!target || target.id === preorderId) return;
+
+    const fromIndex = draft.preorders.findIndex((item) => item.id === preorderId);
+    const toIndex = draft.preorders.findIndex((item) => item.id === target.id);
+    if (fromIndex === -1 || toIndex === -1) return;
+
+    const [moved] = draft.preorders.splice(fromIndex, 1);
+    draft.preorders.splice(toIndex, 0, moved);
+    assignAllocationOrder(draft.preorders);
+    draft.preorders.sort(comparePreordersByMonthAndOrder);
   });
 };
 
@@ -298,6 +445,83 @@ export const setCustomerPriority = (customerId: string, priority: number) => {
             priority: preorder.priority === preorder.customerPriority
               ? normalizedPriority
               : preorder.priority,
+          }
+        : preorder
+    );
+
+    draft.preorders = syncDebtStateForPreorders(draft.preorders, draft.users);
+  });
+};
+
+export const setCustomerDebtProfile = (
+  customerId: string,
+  payload: {
+    debtAmountPln?: number;
+    debtSince?: string;
+    allowOrders?: boolean;
+  },
+) => {
+  updateState((draft) => {
+    draft.users = draft.users.map((user) => {
+      if (user.id !== customerId || user.role !== 'b2b_customer') {
+        return user;
+      }
+
+      return {
+        ...user,
+        debtAmountPln: payload.debtAmountPln && payload.debtAmountPln > 0 ? Math.round(payload.debtAmountPln) : undefined,
+        debtSince: payload.debtSince || undefined,
+        allowOrders: payload.allowOrders ?? user.allowOrders ?? DEFAULT_ALLOW_ORDERS,
+      };
+    });
+
+    draft.preorders = syncDebtStateForPreorders(draft.preorders, draft.users);
+  });
+};
+
+export const setPreorderDebtDecision = (preorderId: string, decision: DebtDecision, adminName?: string) => {
+  updateState((draft) => {
+    const usersById = new Map(draft.users.map((user) => [user.id, user]));
+    draft.preorders = draft.preorders.map((preorder) => {
+      if (preorder.id !== preorderId) {
+        return preorder;
+      }
+
+      const customer = usersById.get(preorder.customerId);
+      if (!isCustomerDelinquent(customer)) {
+        return {
+          ...preorder,
+          debtDecision: 'not_required',
+          debtDecisionAt: undefined,
+          debtDecisionBy: undefined,
+        };
+      }
+
+      return {
+        ...preorder,
+        debtDecision: decision,
+        debtDecisionAt: new Date().toISOString(),
+        debtDecisionBy: adminName,
+      };
+    });
+  });
+};
+
+export const setCompanyDebtDecision = (customerId: string, decision: DebtDecision, adminName?: string) => {
+  updateState((draft) => {
+    const customer = draft.users.find((user) => user.id === customerId);
+    if (!isCustomerDelinquent(customer)) {
+      draft.preorders = syncDebtStateForPreorders(draft.preorders, draft.users);
+      return;
+    }
+
+    draft.preorders = draft.preorders.map((preorder) =>
+      preorder.customerId === customerId && preorder.status === 'pending'
+        ? {
+            ...preorder,
+            debtDecision: decision,
+            debtDecisionAt: new Date().toISOString(),
+            debtDecisionBy: adminName,
           }
         : preorder
     );
@@ -401,6 +625,7 @@ export const createPreorder = (
 
   const { deliveryMonth, seasonWindow } = summarizeDeliveryWindow(normalizedItems);
   const customerPriority = customer.priority ?? 5;
+  const isDelinquent = isCustomerDelinquent(customer);
 
   const preorderItems: PreorderItem[] = normalizedItems.map((item) => ({
     id: `poi_${Date.now()}_${item.variantId}`,
@@ -425,6 +650,7 @@ export const createPreorder = (
     seasonWindow,
     deliveryMonth,
     allocationOrder: state.preorders.length + 1,
+    debtDecision: isDelinquent ? 'pending_review' : 'not_required',
   };
 
   updateState((draft) => {
