@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import { mockProducts } from '../../lib/mock-data';
-import { usePreorders, useCustomers, addConsolidatedOrders } from '../../lib/demo-store';
+import { addConsolidatedOrders, isPreorderEligibleForConsolidation, useCustomers, usePreorders } from '../../lib/demo-store';
 import type { ConsolidatedOrder } from '../../lib/mock-data';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
@@ -43,6 +43,14 @@ export function OrderConfigurator() {
   const selectedBrand = 'Brooks';
   const preorders = usePreorders();
   const customers = useCustomers().filter((user) => user.role === 'b2b_customer');
+  const customerById = useMemo(
+    () => new Map(customers.map((customer) => [customer.id, customer])),
+    [customers],
+  );
+  const eligiblePendingPreorders = useMemo(
+    () => preorders.filter((preorder) => preorder.status === 'pending' && isPreorderEligibleForConsolidation(preorder, customerById.get(preorder.customerId))),
+    [customerById, preorders],
+  );
 
   // Filter state
   const [selectedPriorities, setSelectedPriorities] = useState<Set<number>>(new Set());
@@ -65,8 +73,7 @@ export function OrderConfigurator() {
   // Build full consolidation data
   const consolidatedItems = useMemo((): ConsolidatedItemFull[] => {
     const consolidated = new Map<string, ConsolidatedItemFull>();
-    preorders
-      .filter(po => po.status === 'pending')
+    eligiblePendingPreorders
       .forEach(preorder => {
         const customer = customers.find(u => u.id === preorder.customerId);
         preorder.items.forEach(item => {
@@ -121,7 +128,7 @@ export function OrderConfigurator() {
       });
 
     return Array.from(consolidated.values());
-  }, [preorders, customers, mockProducts]);
+  }, [eligiblePendingPreorders, customers]);
 
   // Available filter options
   const availablePriorities = useMemo(() => {

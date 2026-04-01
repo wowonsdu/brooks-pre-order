@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router';
 import { mockProducts } from '../../lib/mock-data';
-import { applyDeliveryAllocation, useDeliveries, usePreorders } from '../../lib/demo-store';
+import { applyDeliveryAllocation, isPreorderEligibleForConsolidation, useCustomers, useDeliveries, usePreorders } from '../../lib/demo-store';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -27,6 +27,7 @@ interface AllocationEntry {
   customerName: string;
   companyName: string;
   priority: number;
+  allocationOrder: number;
   variantId: string;
   quantityOrdered: number;
   quantityAllocated: number;
@@ -52,6 +53,8 @@ export function AllocationPage() {
   const [autoAllocate] = useState(!hasAwizment);
   const deliveries = useDeliveries();
   const preorders = usePreorders();
+  const customers = useCustomers();
+  const customerById = new Map(customers.map((customer) => [customer.id, customer]));
 
   const delivery = deliveries.find(d => d.id === deliveryId);
 
@@ -66,7 +69,10 @@ export function AllocationPage() {
       const relevantPreorders: AllocationEntry[] = [];
 
       preorders
-        .filter(po => po.status === 'pending' || po.status === 'partially_allocated')
+        .filter(po =>
+          po.status === 'partially_allocated'
+          || (po.status === 'pending' && isPreorderEligibleForConsolidation(po, customerById.get(po.customerId)))
+        )
         .forEach(preorder => {
           const item = preorder.items.find(i => i.variantId === deliveryItem.variantId);
           if (item) {
@@ -79,6 +85,7 @@ export function AllocationPage() {
                 customerName: preorder.customerName,
                 companyName: preorder.companyName,
                 priority: preorder.priority,
+                allocationOrder: preorder.allocationOrder ?? 999,
                 variantId: item.variantId,
                 quantityOrdered: remaining,
                 quantityAllocated: 0,
@@ -88,8 +95,8 @@ export function AllocationPage() {
           }
         });
 
-      // Sort by priority (lower number = higher priority)
-      relevantPreorders.sort((a, b) => a.priority - b.priority);
+      // Real allocation priority follows the preorder position configured on the list.
+      relevantPreorders.sort((a, b) => a.allocationOrder - b.allocationOrder || a.priority - b.priority);
 
       const awizmentAllocations = allocationState.awizementAllocationPlan?.[deliveryItem.variantId] || [];
       let remainingQty = deliveryItem.quantityAnnounced;

@@ -59,6 +59,9 @@
   notes?: string
   seasonWindow?: 'spring' | 'winter'
   deliveryMonth?: number
+  debtDecision: 'not_required' | 'pending_review' | 'approved' | 'rejected'
+  debtDecisionAt?: string
+  debtDecisionBy?: string
 }
 ```
 `PreorderItem`:
@@ -128,6 +131,9 @@
 - `customerPriority` pochodzi z konfiguracji klienta i jest domyślnym ustawieniem preorderu.
 - `priority` to aktualny priorytet preorderu, edytowalny w widoku preorderów.
 - `allocationOrder` to pozycja kolejności do planowania alokacji ręcznej.
+- `debtAmountPln` i `debtSince` definiują zaległość klienta; klient jest zalegający, jeśli kwota > 0 i data jest ustawiona.
+- `allowOrders` działa jako rekomendacja w panelu review na dashboardzie, ale nie dopuszcza preorderu automatycznie do konsolidacji.
+- `debtDecision` określa, czy preorder klienta zalegającego może wejść do konsolidacji.
 
 ### 2.5 Typ `User`
 ```ts
@@ -138,6 +144,9 @@
   role: 'admin' | 'b2b_customer'
   companyName?: string
   priority?: number
+  debtAmountPln?: number
+  debtSince?: string
+  allowOrders?: boolean
 }
 ```
 
@@ -165,11 +174,13 @@ Reguła: `real_product=true` oznacza udane dopasowanie do crawlowego produktu; `
 - `CatalogPage`: filtruje po nazwie i marce, dodaje `variantId` + `quantity` do koszyka w `localStorage`.
 - `CartPage`: edycja ilości, usuwanie, podsumowanie i akcja `submit preorder`.
 - `MyOrdersPage`: odczyt preorderów bieżącego użytkownika (`mockPreorders` po `customerId`).
-- `ConsolidationPage`: agreguje tylko preordery `pending` wg `product.brand`.
+- `ConsolidationPage`: agreguje tylko preordery `pending` dopuszczone do konsolidacji wg `product.brand`.
 - `AllocationPage`: alokuje do preorderów wg `priority`; aktualizacja ilości nie może przekroczyć `quantityAnnounced`.
 - `AllocationPage`: wspiera `location.state.awizementAllocationPlan` i prefilluje alokację na start (procenty z pliku awizacji, z możliwością ręcznej korekty).
 - `DeliveriesPage`: importuje plik awizacji CSV, dopasowuje `ORDER_NUMBER` do `mockPreorders`, mapuje `EAN/SKU` na warianty i zapisuje `matchedOrderSummary` + `awizementAllocationPlan`.
-- `CustomersManagementPage`: edytuje priorytety 1..5.
+- `CustomersManagementPage`: edytuje priorytety 1..5 oraz profil zaległości klienta.
+- `AdminDashboard`: renderuje czerwony panel review dla preorderów klientów zalegających, z decyzją per preorder i akcją zbiorczą dla całej firmy.
+- `PreordersListPage`: pokazuje badge `Zalega` i szczegóły zaległości / review w rozwinięciu preorderu.
 - `OrdersHistoryPage`: pokazuje listę obiektów `ConsolidatedOrder` (zamówienia źródłowe z konsolidacji), z filtrowaniem, eksportem CSV i ekspansją pozycji.
 
 ## 5) Statusy i przejścia

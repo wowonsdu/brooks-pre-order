@@ -152,6 +152,12 @@ export function generateCustomers(): User[] {
     'Champion Bydgoszcz',
     'TopSport Lublin'
   ];
+
+  const debtProfiles: Record<number, Pick<User, 'debtAmountPln' | 'debtSince' | 'allowOrders'>> = {
+    1: { debtAmountPln: 18450, debtSince: '2026-01-12', allowOrders: false },
+    4: { debtAmountPln: 9200, debtSince: '2026-02-03', allowOrders: true },
+    7: { debtAmountPln: 27600, debtSince: '2025-12-18', allowOrders: false },
+  };
   
   return companies.map((company, index) => ({
     id: `customer_${index + 1}`,
@@ -159,7 +165,10 @@ export function generateCustomers(): User[] {
     name: `${company} - Dział Zakupów`,
     role: 'b2b_customer' as const,
     companyName: company,
-    priority: (index % 5) + 1 // Priorities 1-5, evenly distributed
+    priority: (index % 5) + 1, // Priorities 1-5, evenly distributed
+    allowOrders: debtProfiles[index]?.allowOrders ?? true,
+    debtAmountPln: debtProfiles[index]?.debtAmountPln,
+    debtSince: debtProfiles[index]?.debtSince,
   }));
 }
 
@@ -224,7 +233,8 @@ export function generatePreorders(customers: User[], products: Product[]): Preor
         items,
         status: 'pending',
         createdAt: new Date(2026, creationMonth, randomInt(1, 28)).toISOString(),
-        notes: notes[i]
+        notes: notes[i],
+        debtDecision: customer.debtAmountPln && customer.debtSince ? 'pending_review' : 'not_required',
       });
     }
   });
